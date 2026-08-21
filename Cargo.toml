@@ -1,0 +1,26 @@
+[package]
+name = "lightweight-simd"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Lightweight generic fixed-array vector types relying on compiler auto-vectorization"
+readme = "README.md"
+keywords = ["simd", "vector", "numeric"]
+categories = ["science", "mathematics"]
+
+[dependencies]
+duplicate = "2.0"
+num-traits = "0.2"
+num-complex = { version = "0.4", optional = true }
+half = { version = "2", optional = true, features = ["num-traits"] }
+
+[dev-dependencies]
+num-complex = "0.4"
+half = { version = "2", features = ["num-traits"] }
+
+[features]
+complex = ["dep:num-complex"]
+half = ["dep:half"]
+
+[profile.dev]
+opt-level = 2
