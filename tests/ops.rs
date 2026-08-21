@@ -161,7 +161,7 @@ fn mask_concrete() {
     let m = mask8::from([true, false, true, true, false, false, true, false]);
     assert!(m.any_true());
     assert!(!m.all_true());
-    assert_eq!(m.select(f64x8::splat(1.0), f64x8::splat(2.0)).reduce_sum(), 12.0);
+    assert_eq!(f64x8::splat(1.0).mask_select(m, f64x8::splat(2.0)).reduce_sum(), 12.0);
     assert!(!(m & mask8::splat(false)).any_true());
     assert!((m | mask8::splat(true)).all_true());
 }
@@ -206,7 +206,7 @@ fn reduce_floats_and_ints() {
 #[test]
 fn complex_aliases() {
     use num_complex::Complex;
-    let v: lightweight_simd::c64x8 = Simd::splat(Complex::new(1.0, -1.0));
+    let v: lightweight_simd::c64x8 = lightweight_simd::c64x8::splat(Complex::new(1.0, -1.0));
     assert_eq!(v.reduce_sum(), Complex::new(8.0, -8.0));
 }
 
@@ -214,8 +214,8 @@ fn complex_aliases() {
 #[test]
 fn half_aliases() {
     use half::{bf16, f16};
-    let v: lightweight_simd::f16x8 = Simd::splat(f16::from_f32(1.0));
+    let v = lightweight_simd::f16x8::splat(f16::from_f32(1.0));
     assert_eq!(v.reduce_sum_n(4), f16::from_f32(4.0));
-    let w: lightweight_simd::bf16x16 = Simd::splat(bf16::from_f32(0.5));
+    let w = lightweight_simd::bf16x16::splat(bf16::from_f32(0.5));
     assert_eq!(w.reduce_sum(), bf16::from_f32(8.0));
 }

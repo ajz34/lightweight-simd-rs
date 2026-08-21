@@ -2,75 +2,84 @@
 
 //! Type aliases for common element/lane-count combinations.
 //!
-//! Aliases are plain (naturally aligned) in this version; enforced-alignment
-//! variants are planned as wrappers in a later step.
+//! Element aliases are enforced-alignment vector types from [`crate::aligned`]:
+//! the alignment is the vector's byte size rounded up to a power of two, capped
+//! at 64 bytes. Mask aliases are plain [`Simd<bool, N>`] — masks are
+//! register-resident temporaries and carry no enforced alignment.
 
-use crate::Simd;
+use crate::{Aligned4, Aligned8, Aligned16, Aligned32, Aligned64, Simd};
 
 #[duplicate::duplicate_item(
-    _name_  _elem_  _n_;
-    [f64x2]   [f64]  [2];
-    [f64x4]   [f64]  [4];
-    [f64x8]   [f64]  [8];
-    [f64x16]  [f64]  [16];
-    [f32x2]   [f32]  [2];
-    [f32x4]   [f32]  [4];
-    [f32x8]   [f32]  [8];
-    [f32x16]  [f32]  [16];
-    [i64x2]   [i64]  [2];
-    [i64x4]   [i64]  [4];
-    [i64x8]   [i64]  [8];
-    [i64x16]  [i64]  [16];
-    [i32x4]   [i32]  [4];
-    [i32x8]   [i32]  [8];
-    [i32x16]  [i32]  [16];
-    [i16x4]   [i16]  [4];
-    [i16x8]   [i16]  [8];
-    [i16x16]  [i16]  [16];
-    [i16x32]  [i16]  [32];
-    [i8x8]    [i8]   [8];
-    [i8x16]   [i8]   [16];
-    [i8x32]   [i8]   [32];
-    [i8x64]   [i8]   [64];
-    [mask4]   [bool] [4];
-    [mask8]   [bool] [8];
-    [mask16]  [bool] [16];
-    [mask32]  [bool] [32];
+    _name_  _elem_  _n_  _vec_;
+    [f64x2]   [f64]  [2]   [Aligned16];
+    [f64x4]   [f64]  [4]   [Aligned32];
+    [f64x8]   [f64]  [8]   [Aligned64];
+    [f64x16]  [f64]  [16]  [Aligned64];
+    [f32x2]   [f32]  [2]   [Aligned8];
+    [f32x4]   [f32]  [4]   [Aligned16];
+    [f32x8]   [f32]  [8]   [Aligned32];
+    [f32x16]  [f32]  [16]  [Aligned64];
+    [i64x2]   [i64]  [2]   [Aligned16];
+    [i64x4]   [i64]  [4]   [Aligned32];
+    [i64x8]   [i64]  [8]   [Aligned64];
+    [i64x16]  [i64]  [16]  [Aligned64];
+    [i32x4]   [i32]  [4]   [Aligned16];
+    [i32x8]   [i32]  [8]   [Aligned32];
+    [i32x16]  [i32]  [16]  [Aligned64];
+    [i16x4]   [i16]  [4]   [Aligned8];
+    [i16x8]   [i16]  [8]   [Aligned16];
+    [i16x16]  [i16]  [16]  [Aligned32];
+    [i16x32]  [i16]  [32]  [Aligned64];
+    [i8x8]    [i8]   [8]   [Aligned8];
+    [i8x16]   [i8]   [16]  [Aligned16];
+    [i8x32]   [i8]   [32]  [Aligned32];
+    [i8x64]   [i8]   [64]  [Aligned64];
 )]
 #[allow(non_camel_case_types)]
-#[doc = concat!("Alias of [`Simd<", stringify!(_elem_), ", ", stringify!(_n_), ">`](crate::Simd).")]
-pub type _name_ = Simd<_elem_, _n_>;
+#[doc = concat!("Alias of [`Simd<", stringify!(_elem_), ", ", stringify!(_n_), ">`](crate::Simd) with enforced alignment (", stringify!(_vec_), ").")]
+pub type _name_ = _vec_<_elem_, _n_>;
 
 #[cfg(feature = "complex")]
 #[duplicate::duplicate_item(
-    _name_  _elem_                    _n_;
-    [c64x2]   [num_complex::Complex<f64>]  [2];
-    [c64x4]   [num_complex::Complex<f64>]  [4];
-    [c64x8]   [num_complex::Complex<f64>]  [8];
-    [c32x4]   [num_complex::Complex<f32>]  [4];
-    [c32x8]   [num_complex::Complex<f32>]  [8];
-    [c32x16]  [num_complex::Complex<f32>]  [16];
+    _name_  _elem_                    _n_  _vec_;
+    [c64x2]  [num_complex::Complex<f64>]  [2]   [Aligned32];
+    [c64x4]  [num_complex::Complex<f64>]  [4]   [Aligned64];
+    [c64x8]  [num_complex::Complex<f64>]  [8]   [Aligned64];
+    [c32x4]  [num_complex::Complex<f32>]  [4]   [Aligned32];
+    [c32x8]  [num_complex::Complex<f32>]  [8]   [Aligned64];
+    [c32x16] [num_complex::Complex<f32>]  [16]  [Aligned64];
 )]
 #[allow(non_camel_case_types)]
-#[doc = concat!("Alias of [`Simd<", stringify!(_elem_), ", ", stringify!(_n_), ">`](crate::Simd).")]
-pub type _name_ = Simd<_elem_, _n_>;
+#[doc = concat!("Alias of [`Simd<", stringify!(_elem_), ", ", stringify!(_n_), ">`](crate::Simd) with enforced alignment (", stringify!(_vec_), ").")]
+pub type _name_ = _vec_<_elem_, _n_>;
 
 #[cfg(feature = "half")]
 #[duplicate::duplicate_item(
-    _name_     _elem_       _n_;
-    [f16x2]    [half::f16]  [2];
-    [f16x4]    [half::f16]  [4];
-    [f16x8]    [half::f16]  [8];
-    [f16x16]   [half::f16]  [16];
-    [f16x32]   [half::f16]  [32];
-    [f16x64]   [half::f16]  [64];
-    [bf16x2]   [half::bf16] [2];
-    [bf16x4]   [half::bf16] [4];
-    [bf16x8]   [half::bf16] [8];
-    [bf16x16]  [half::bf16] [16];
-    [bf16x32]  [half::bf16] [32];
-    [bf16x64]  [half::bf16] [64];
+    _name_     _elem_       _n_  _vec_;
+    [f16x2]    [half::f16]  [2]   [Aligned4];
+    [f16x4]    [half::f16]  [4]   [Aligned8];
+    [f16x8]    [half::f16]  [8]   [Aligned16];
+    [f16x16]   [half::f16]  [16]  [Aligned32];
+    [f16x32]   [half::f16]  [32]  [Aligned64];
+    [f16x64]   [half::f16]  [64]  [Aligned64];
+    [bf16x2]   [half::bf16] [2]   [Aligned4];
+    [bf16x4]   [half::bf16] [4]   [Aligned8];
+    [bf16x8]   [half::bf16] [8]   [Aligned16];
+    [bf16x16]  [half::bf16] [16]  [Aligned32];
+    [bf16x32]  [half::bf16] [32]  [Aligned64];
+    [bf16x64]  [half::bf16] [64]  [Aligned64];
 )]
 #[allow(non_camel_case_types)]
-#[doc = concat!("Alias of [`Simd<", stringify!(_elem_), ", ", stringify!(_n_), ">`](crate::Simd).")]
-pub type _name_ = Simd<_elem_, _n_>;
+#[doc = concat!("Alias of [`Simd<", stringify!(_elem_), ", ", stringify!(_n_), ">`](crate::Simd) with enforced alignment (", stringify!(_vec_), ").")]
+pub type _name_ = _vec_<_elem_, _n_>;
+
+#[duplicate::duplicate_item(
+    _name_   _n_;
+    [mask4]   [4];
+    [mask8]   [8];
+    [mask16]  [16];
+    [mask32]  [32];
+)]
+#[allow(non_camel_case_types)]
+#[doc = concat!("Plain (unaligned) mask alias of [`Simd<bool, ", stringify!(_n_), ">`](crate::Simd).")]
+pub type _name_ = Simd<bool, _n_>;

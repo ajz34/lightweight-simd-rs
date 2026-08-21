@@ -50,8 +50,9 @@ instruction selection; speed comes from compiler auto-vectorization under the re
 target CPU.
 _Avoid_: soft SIMD, scalar path, backend
 
-**Aligned alias** (planned):
-A named vector type that adds enforced memory alignment on top of the generic vector.
+**Aligned alias**:
+A named vector type that adds enforced memory alignment on top of the generic vector;
+the concrete element aliases are aligned aliases. Masks are never aligned aliases.
 _Avoid_: aligned type, aligned wrapper
 
 **Block**:

@@ -20,20 +20,30 @@
 //! `Simd<bool, N>` doubles as the mask type. The lane count `N` is an
 //! arbitrary const generic.
 //!
+//! Concrete aliases such as `f64x8` are enforced-alignment types
+//! ([`Aligned64<f64, 8>`](Aligned64)): array-backed siblings of [`Simd`] that
+//! share one implementation — every operation is defined once for `Simd` and
+//! the five aligned types together. The alignment is the vector's byte size
+//! rounded up to a power of two, capped at 64 bytes; conversions between plain
+//! and aligned vectors are `From`/`.0`/`to_simd`. Masks (`Simd<bool, N>` and
+//! the `maskN` aliases) carry no enforced alignment; per-lane selection is
+//! [`mask_select`](Simd::mask_select) on the value (available on every vector
+//! type), or [`Simd::select`] on the mask for plain vectors.
+//!
 //! # Example
 //!
 //! ```
-//! use lightweight_simd::{f64x8, Simd};
+//! use lightweight_simd::f64x8;
 //!
 //! let a = f64x8::splat(2.0);
-//! let b: f64x8 = Simd::from([1.0; 8]);
+//! let b = f64x8::from([1.0; 8]);
 //! // lane-wise fused: (a * b) * 3.0 + 0.0
 //! let c = (a * b).mul_add(f64x8::splat(3.0), f64x8::zero());
 //! assert_eq!(c.reduce_sum(), 48.0);
 //!
 //! let mask = a.simd_gt(b);
 //! assert!(mask.all_true());
-//! assert_eq!(mask.select(a, b).reduce_sum(), 16.0);
+//! assert_eq!(a.mask_select(mask, b).reduce_sum(), 16.0);
 //! ```
 
 #![warn(missing_docs)]
@@ -43,11 +53,13 @@ use core::ops::{Index, IndexMut};
 use num_traits::{Num, One, Zero};
 
 mod alias;
+pub mod aligned;
 mod memory;
 mod ops;
 mod reduce;
 
 pub use alias::*;
+pub use aligned::{Aligned4, Aligned8, Aligned16, Aligned32, Aligned64};
 
 /// A fixed-length vector of `N` lanes of element type `T`.
 ///
@@ -57,143 +69,180 @@ pub use alias::*;
 /// that fill whole SIMD registers are the sweet spot, but not required).
 ///
 /// The type carries no enforced alignment beyond the element's natural
-/// alignment; the field is public for zero-friction interoperability with
-/// array code.
+/// alignment; for enforced alignment use the [`aligned`] sibling types, which
+/// share this type's full operation surface. The field is public for
+/// zero-friction interoperability with array code.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Copy)]
 pub struct Simd<T, const N: usize>(pub [T; N]);
 
-impl<T: Default, const N: usize> Default for Simd<T, N> {
-    #[inline(always)]
-    fn default() -> Self {
-        Self(core::array::from_fn(|_| T::default()))
-    }
-}
+#[duplicate::duplicate_item(
+    _mod_        _vec_;
+    [simd_impls] [Simd];
+    [impls_a4]   [Aligned4];
+    [impls_a8]   [Aligned8];
+    [impls_a16]  [Aligned16];
+    [impls_a32]  [Aligned32];
+    [impls_a64]  [Aligned64];
+)]
+mod _mod_ {
+    use super::*;
 
-impl<T, const N: usize> Simd<T, N> {
-    /// Returns a vector whose lane `i` is `f(i)`.
-    #[inline(always)]
-    pub fn from_fn<F>(f: F) -> Self
-    where
-        F: FnMut(usize) -> T,
-    {
-        Self(core::array::from_fn(f))
-    }
+    /* #region constructors and access */
 
-    /// Applies `f` to each lane, returning a new vector.
-    ///
-    /// This is the generic escape hatch for operations the crate does not
-    /// provide (e.g. transcendental functions: `v.map(f64::exp)`).
-    #[inline(always)]
-    pub fn map<F>(self, f: F) -> Self
-    where
-        F: FnMut(T) -> T,
-    {
-        Self(self.0.map(f))
-    }
+    impl<T, const N: usize> _vec_<T, N> {
+        /// Returns a vector whose lane `i` is `f(i)`.
+        #[inline(always)]
+        pub fn from_fn<F>(f: F) -> Self
+        where
+            F: FnMut(usize) -> T,
+        {
+            Self(core::array::from_fn(f))
+        }
 
-    /// Returns the underlying array by reference.
-    #[inline(always)]
-    pub const fn as_array(&self) -> &[T; N] {
-        &self.0
-    }
+        /// Applies `f` to each lane, returning a new vector.
+        ///
+        /// This is the generic escape hatch for operations the crate does not
+        /// provide (e.g. transcendental functions: `v.map(f64::exp)`).
+        #[inline(always)]
+        pub fn map<F>(self, f: F) -> Self
+        where
+            F: FnMut(T) -> T,
+        {
+            Self(self.0.map(f))
+        }
 
-    /// Returns the underlying array by mutable reference.
-    #[inline(always)]
-    pub fn as_array_mut(&mut self) -> &mut [T; N] {
-        &mut self.0
-    }
+        /// Returns the underlying array by reference.
+        #[inline(always)]
+        pub const fn as_array(&self) -> &[T; N] {
+            &self.0
+        }
 
-    /// Returns the underlying array by value.
-    #[inline(always)]
-    pub fn to_array(self) -> [T; N] {
-        self.0
-    }
-}
+        /// Returns the underlying array by mutable reference.
+        #[inline(always)]
+        pub fn as_array_mut(&mut self) -> &mut [T; N] {
+            &mut self.0
+        }
 
-impl<T: Copy, const N: usize> Simd<T, N> {
-    /// Returns a vector with all lanes set to `val`.
-    #[inline(always)]
-    pub const fn splat(val: T) -> Self {
-        Self([val; N])
-    }
-
-    /// Sets all lanes to `val`.
-    #[inline(always)]
-    pub fn fill(&mut self, val: T) {
-        self.0 = [val; N];
+        /// Returns the underlying array by value.
+        #[inline(always)]
+        pub fn to_array(self) -> [T; N] {
+            self.0
+        }
     }
 
-    /// Returns an uninitialized vector, intended for scratch buffers whose
-    /// lanes are fully written before being read.
-    ///
-    /// # Safety
-    ///
-    /// The caller must initialize all lanes before any read. The element type
-    /// must additionally admit arbitrary bit patterns (true for floats and
-    /// integers; not for types with niches such as references).
-    #[inline(always)]
-    #[allow(clippy::uninit_assumed_init)]
-    pub unsafe fn uninit() -> Self {
-        // SAFETY: the caller contract requires full initialization before any
-        // read of the returned value.
-        unsafe { core::mem::MaybeUninit::uninit().assume_init() }
-    }
-}
+    impl<T: Copy, const N: usize> _vec_<T, N> {
+        /// Returns a vector with all lanes set to `val`.
+        #[inline(always)]
+        pub const fn splat(val: T) -> Self {
+            Self([val; N])
+        }
 
-impl<T: Zero + Copy, const N: usize> Simd<T, N> {
-    /// Returns a vector with all lanes set to zero.
-    #[inline(always)]
-    pub fn zero() -> Self {
-        Self::splat(T::zero())
-    }
-}
+        /// Sets all lanes to `val`.
+        #[inline(always)]
+        pub fn fill(&mut self, val: T) {
+            self.0 = [val; N];
+        }
 
-impl<T: One + Copy, const N: usize> Simd<T, N> {
-    /// Returns a vector with all lanes set to one.
-    #[inline(always)]
-    pub fn one() -> Self {
-        Self::splat(T::one())
-    }
-}
+        /// Per-lane select: keeps lanes of `self` where `mask` is `true` and
+        /// lanes of `other` where it is `false`. This value-side form is
+        /// available on every vector type; the mask-side
+        /// [`select`](Simd::select) applies to plain vectors.
+        #[inline(always)]
+        pub fn mask_select(self, mask: Simd<bool, N>, other: Self) -> Self {
+            let mut out = self.0;
+            for ((o, f), m) in out.iter_mut().zip(other.0).zip(mask.0) {
+                if !m {
+                    *o = f;
+                }
+            }
+            Self(out)
+        }
 
-impl<T, const N: usize> From<[T; N]> for Simd<T, N> {
-    #[inline(always)]
-    fn from(array: [T; N]) -> Self {
-        Self(array)
-    }
-}
-
-impl<T, const N: usize> Index<usize> for Simd<T, N> {
-    type Output = T;
-
-    #[inline(always)]
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.0[index]
-    }
-}
-
-impl<T, const N: usize> IndexMut<usize> for Simd<T, N> {
-    #[inline(always)]
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.0[index]
-    }
-}
-
-impl<T: Num + Copy, const N: usize> Zero for Simd<T, N> {
-    #[inline(always)]
-    fn zero() -> Self {
-        Self::splat(T::zero())
+        /// Returns an uninitialized vector, intended for scratch buffers whose
+        /// lanes are fully written before being read.
+        ///
+        /// # Safety
+        ///
+        /// The caller must initialize all lanes before any read. The element
+        /// type must additionally admit arbitrary bit patterns (true for
+        /// floats and integers; not for types with niches such as references).
+        #[inline(always)]
+        #[allow(clippy::uninit_assumed_init)]
+        pub unsafe fn uninit() -> Self {
+            // SAFETY: the caller contract requires full initialization before
+            // any read of the returned value.
+            unsafe { core::mem::MaybeUninit::uninit().assume_init() }
+        }
     }
 
-    #[inline(always)]
-    fn is_zero(&self) -> bool {
-        self.0.iter().all(Zero::is_zero)
+    impl<T: Zero + Copy, const N: usize> _vec_<T, N> {
+        /// Returns a vector with all lanes set to zero.
+        #[inline(always)]
+        pub fn zero() -> Self {
+            Self::splat(T::zero())
+        }
     }
-}
 
-impl<T: Num + Copy, const N: usize> One for Simd<T, N> {
-    #[inline(always)]
-    fn one() -> Self {
-        Self::splat(T::one())
+    impl<T: One + Copy, const N: usize> _vec_<T, N> {
+        /// Returns a vector with all lanes set to one.
+        #[inline(always)]
+        pub fn one() -> Self {
+            Self::splat(T::one())
+        }
     }
+
+    /* #endregion */
+
+    /* #region common traits */
+
+    impl<T: Default, const N: usize> Default for _vec_<T, N> {
+        #[inline(always)]
+        fn default() -> Self {
+            Self(core::array::from_fn(|_| T::default()))
+        }
+    }
+
+    impl<T, const N: usize> From<[T; N]> for _vec_<T, N> {
+        #[inline(always)]
+        fn from(array: [T; N]) -> Self {
+            Self(array)
+        }
+    }
+
+    impl<T, const N: usize> Index<usize> for _vec_<T, N> {
+        type Output = T;
+
+        #[inline(always)]
+        fn index(&self, index: usize) -> &Self::Output {
+            &self.0[index]
+        }
+    }
+
+    impl<T, const N: usize> IndexMut<usize> for _vec_<T, N> {
+        #[inline(always)]
+        fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+            &mut self.0[index]
+        }
+    }
+
+    impl<T: Num + Copy, const N: usize> Zero for _vec_<T, N> {
+        #[inline(always)]
+        fn zero() -> Self {
+            Self::splat(T::zero())
+        }
+
+        #[inline(always)]
+        fn is_zero(&self) -> bool {
+            self.0.iter().all(Zero::is_zero)
+        }
+    }
+
+    impl<T: Num + Copy, const N: usize> One for _vec_<T, N> {
+        #[inline(always)]
+        fn one() -> Self {
+            Self::splat(T::one())
+        }
+    }
+
+    /* #endregion */
 }
