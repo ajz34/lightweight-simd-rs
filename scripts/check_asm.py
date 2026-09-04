@@ -32,6 +32,7 @@ Exit:  0 all REQUIRED checks pass (or info mode), 1 any REQUIRED miss,
        2 harness error.
 """
 
+import json
 import os
 import re
 import subprocess
@@ -466,24 +467,49 @@ def host_arch():
     return m.group(1).split("-")[0] if m else None
 
 
+def host_triple():
+    vv = sh(["rustc", "-vV"]).stdout
+    m = re.search(r"^host: (\S+)", vv, re.M)
+    return m.group(1) if m else None
+
+
+# Host artifacts (build scripts, proc macros) execute on the build host, so
+# they must never receive a row's target-cpu: a build script compiled for
+# x86-64-v4 SIGILLs on hosts without AVX-512 (observed on CI runners). Row
+# flags reach only the target graph (see compile_rows).
+HOST_BASELINE = {"x86_64": "x86-64", "aarch64": "generic"}
+
+
 def compile_rows(arch, rows):
     """Emit assembly for every row through the helper package.
 
-    RUSTFLAGS carries the row's -C target-cpu (and any extra flags), which
-    also rebuilds the dependency for that flag set; the emit path must be
-    absolute because cargo runs rustc with a different working directory.
+    The row's -C target-cpu (and any extra flags) ride the target graph via
+    `[target.<host-triple>] rustflags` config rather than the RUSTFLAGS
+    environment: RUSTFLAGS also applies to build scripts and proc macros,
+    which then crash with SIGILL on hosts lacking the row's instruction set.
+    `-Ztarget-applies-to-host -Zhost-config` (nightly; this repo pins
+    nightly) let `host.rustflags` pin those host artifacts to the arch's
+    baseline. The emit path must be absolute because cargo runs rustc with a
+    different working directory.
     """
     ASM_DIR.mkdir(parents=True, exist_ok=True)
-    # dedicated target dir: the per-row RUSTFLAGS must not churn the root
+    # dedicated target dir: the per-row flags must not churn the root
     # build's fingerprints
     env = {**os.environ, "CARGO_TARGET_DIR": str(ROOT / "target" / "asm-build")}
+    env.pop("RUSTFLAGS", None)
+    triple = host_triple()
+    host_cfg = json.dumps(["-C", f"target-cpu={HOST_BASELINE[arch]}"])
     out = {}
     for name, cpu, extra, cargo_extra in rows:
         asm_path = ASM_DIR / f"{arch}-{name}.s"
-        env["RUSTFLAGS"] = " ".join([f"-Ctarget-cpu={cpu}", *extra])
+        target_cfg = json.dumps(["-C", f"target-cpu={cpu}", *extra])
         sh(["cargo", "rustc",
             "--manifest-path", str(PROBES_MANIFEST),
-            "--release", *cargo_extra,
+            "--release",
+            "-Ztarget-applies-to-host", "-Zhost-config",
+            "--config", f"target.{triple}.rustflags={target_cfg}",
+            "--config", f"host.rustflags={host_cfg}",
+            *cargo_extra,
             "--", "--emit", f"asm={asm_path}"], env=env)
         out[name] = asm_path
     return out
