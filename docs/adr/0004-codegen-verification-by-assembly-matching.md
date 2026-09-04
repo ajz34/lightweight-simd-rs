@@ -46,10 +46,17 @@ harness can go red.
   (`--hist` prints per-probe instruction histograms, `--dump` shows single
   bodies). Cross-emission from another host is deliberately not wired up.
 - Emission goes through a helper package (`scripts/asm/probes`,
-  `cargo rustc --emit asm` with per-row `RUSTFLAGS` and a dedicated target
-  dir): manual `rustc --extern` cannot pair modern cargo's split
-  stub-rlib/full-rmeta artifacts, and stale rlibs from earlier toolchains
-  are indistinguishable by name or mtime.
+  `cargo rustc --emit asm` with per-row target-graph rustflags and a
+  dedicated target dir): manual `rustc --extern` cannot pair modern
+  cargo's split stub-rlib/full-rmeta artifacts, and stale rlibs from earlier
+  toolchains are indistinguishable by name or mtime. Row flags ride
+  `[target.<host-triple>] rustflags` config — not the `RUSTFLAGS`
+  environment — with `-Ztarget-applies-to-host -Zhost-config` plus
+  `host.rustflags` pinning build scripts and proc macros to the arch's
+  baseline: `RUSTFLAGS` also applies to those host artifacts, and a build
+  script compiled for `x86-64-v4` SIGILLs on hosts without AVX-512
+  (observed on CI runners). Swapping the delivery mechanism kept the
+  emitted assembly byte-identical apart from symbol hashes.
 - Recorded known-scalar results (x86_64): `mul_add` at v2 under the
   `use_libm_fma` feature (no FMA ISA → scalar libm `fma` calls; the default
   separated mode is a hard mul+add check there), i64 shifts before AVX-512
