@@ -43,8 +43,8 @@ mod _mod_ {
         pub fn reduce_sum_n(self, n: usize) -> T {
             assert!(n <= N, "reduce_sum_n: n = {n} exceeds lane count {N}");
             let mut acc = T::zero();
-            for i in 0..n {
-                acc = acc + self.0[i];
+            for x in self.0.iter().take(n) {
+                acc = acc + *x;
             }
             acc
         }
@@ -73,8 +73,8 @@ mod _mod_ {
         pub fn reduce_product_n(self, n: usize) -> T {
             assert!(n <= N, "reduce_product_n: n = {n} exceeds lane count {N}");
             let mut acc = T::one();
-            for i in 0..n {
-                acc = acc * self.0[i];
+            for x in self.0.iter().take(n) {
+                acc = acc * *x;
             }
             acc
         }

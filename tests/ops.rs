@@ -3,8 +3,12 @@
 //! Correctness tests for bitwise/shift operators, fused multiply-add, float
 //! functions, comparisons/masks, and reductions.
 
+#[cfg(not(feature = "use_libm_fma"))]
+use core::ops::{Add, Mul};
 use core::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign};
-use num_traits::{Float, MulAdd, Num};
+#[cfg(feature = "use_libm_fma")]
+use num_traits::MulAdd;
+use num_traits::{Float, Num};
 
 use lightweight_simd::{Simd, f64x4, f64x8, mask8};
 
@@ -49,6 +53,24 @@ fn shifts_i64() {
     assert_eq!(((v << 3) >> 1).to_array(), [4, 8, 12, 16]);
 }
 
+/// Reference and crate method must agree under whichever evaluation mode the
+/// crate was built in: default = separated `a * b + c`, `use_libm_fma` =
+/// fused `MulAdd::mul_add`.
+#[cfg(not(feature = "use_libm_fma"))]
+fn check_fused<T, const N: usize>(a_mk: &impl Fn(usize) -> T, b_mk: &impl Fn(usize) -> T)
+where
+    T: Mul<Output = T> + Add<Output = T> + Copy + PartialEq + std::fmt::Debug,
+{
+    let a = Simd::<T, N>::from_fn(a_mk);
+    let b = Simd::<T, N>::from_fn(b_mk);
+    let c = Simd::<T, N>::from_fn(|i| a_mk(i + 7));
+    assert_eq!(a.mul_add(b, c).to_array(), core::array::from_fn(|i| a_mk(i) * b_mk(i) + a_mk(i + 7)));
+    let mut acc = c;
+    acc.fma_from(b, a);
+    assert_eq!(acc.to_array(), core::array::from_fn(|i| b_mk(i) * a_mk(i) + a_mk(i + 7)));
+}
+
+#[cfg(feature = "use_libm_fma")]
 fn check_fused<T, const N: usize>(a_mk: &impl Fn(usize) -> T, b_mk: &impl Fn(usize) -> T)
 where
     T: MulAdd<Output = T> + Copy + PartialEq + std::fmt::Debug,
@@ -75,6 +97,23 @@ fn fused_floats() {
     let mut acc = f64x4::from([1.0; 4]);
     acc.fma_from(f64x4::from([2.0; 4]), f64x4::from([3.0; 4]));
     assert_eq!(acc.to_array(), [7.0; 4]);
+}
+
+/// The two evaluation modes genuinely differ in rounding: with
+/// a = 1 + 2^-52, b = 1 - 2^-53, c = 2^-53, the exact a*b + c lies just
+/// below 1 + 2^-52, so a single rounding keeps it there, while rounding
+/// a*b first (to 1.0) and then adding c (tie to even) lands on 1.0.
+/// Expected values are bit literals, not compiler-evaluated expressions.
+#[test]
+fn mul_add_rounding_mode() {
+    let a = f64x8::splat(1.0 + f64::EPSILON);
+    let b = f64x8::splat(1.0 - 0.5 * f64::EPSILON);
+    let c = f64x8::splat(0.5 * f64::EPSILON);
+    let got = a.mul_add(b, c)[0].to_bits();
+    #[cfg(feature = "use_libm_fma")]
+    assert_eq!(got, 0x3ff0000000000001); // fused: 1 + 2^-52
+    #[cfg(not(feature = "use_libm_fma"))]
+    assert_eq!(got, 0x3ff0000000000000); // separated: rounds to 1.0
 }
 
 fn check_float<T, const N: usize>(mk: &impl Fn(usize) -> T)

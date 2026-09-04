@@ -45,11 +45,12 @@ harness can go red.
   dir): manual `rustc --extern` cannot pair modern cargo's split
   stub-rlib/full-rmeta artifacts, and stale rlibs from earlier toolchains
   are indistinguishable by name or mtime.
-- Recorded known-scalar results (x86_64): `mul_add` at v2 (no FMA ISA →
-  scalar libm `fma` calls), i64 shifts before AVX-512 (GPR `shlq`/`sarq`,
-  semantics verified numerically), `f16` arithmetic via `half` (soft),
-  strict-order reductions at v2/v3 (scalar chain), `store_slice_partial`
-  (runtime tail length).
+- Recorded known-scalar results (x86_64): `mul_add` at v2 under the
+  `use_libm_fma` feature (no FMA ISA → scalar libm `fma` calls; the default
+  separated mode is a hard mul+add check there), i64 shifts before AVX-512
+  (GPR `shlq`/`sarq`, semantics verified numerically), `f16` arithmetic via
+  `half` (soft), strict-order reductions at v2/v3 (scalar chain),
+  `store_slice_partial` (runtime tail length).
 - Probe-design constraint: masks must be consumed by a vector operation —
   comparisons feeding only reductions get scalarized by LLVM.
 - Adding or changing an operation should update the probe table in the same

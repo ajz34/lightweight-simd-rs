@@ -7,7 +7,9 @@
 //! at 64 bytes. Mask aliases are plain [`Simd<bool, N>`] — masks are
 //! register-resident temporaries and carry no enforced alignment.
 
-use crate::{Aligned4, Aligned8, Aligned16, Aligned32, Aligned64, Simd};
+#[cfg(feature = "half")]
+use crate::Aligned4;
+use crate::{Aligned8, Aligned16, Aligned32, Aligned64, Simd};
 
 #[duplicate::duplicate_item(
     _name_  _elem_  _n_  _vec_;

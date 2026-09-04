@@ -4,7 +4,9 @@
 //! types ([`Simd`] and its [`aligned`](crate::aligned) siblings).
 
 use core::ops::*;
-use num_traits::{Float, MulAdd, Num, NumAssignOps};
+#[cfg(feature = "use_libm_fma")]
+use num_traits::MulAdd;
+use num_traits::{Float, Num, NumAssignOps};
 
 use crate::{Aligned4, Aligned8, Aligned16, Aligned32, Aligned64, Simd};
 
@@ -234,14 +236,62 @@ mod _mod_ {
 
     /* #region fused multiply-add */
 
+    /// The evaluation strategy of [`mul_add`](Self::mul_add) and
+    /// [`fma_from`](Self::fma_from) is a compile-time choice; this is the
+    /// default. See the crate docs and docs/adr/0005 for the full trade-off.
+    #[cfg(not(feature = "use_libm_fma"))]
+    impl<T, const N: usize> _vec_<T, N>
+    where
+        T: Mul<Output = T> + Add<Output = T> + Copy,
+    {
+        /// Lane-wise multiply-add: `self * b + c`, evaluated as a separate
+        /// multiply and add (two roundings per lane).
+        ///
+        /// This is the default mode. On targets without hardware FMA it
+        /// avoids the slow software-fused libm `fma` calls (measured ~4.6x
+        /// slower per lane there); on FMA-capable targets the expression
+        /// still fuses into a single hardware FMA instruction when compiled
+        /// with `-C llvm-args=-fp-contract=fast`. The non-default cargo
+        /// feature `use_libm_fma` switches to the element's fused `MulAdd`
+        /// instead: single rounding, hardware FMA without extra flags, slow
+        /// libm fallback on pre-FMA targets.
+        #[inline(always)]
+        pub fn mul_add(self, b: Self, c: Self) -> Self {
+            let mut out = self.0;
+            for ((o, b), c) in out.iter_mut().zip(b.0).zip(c.0) {
+                *o = *o * b + c;
+            }
+            Self(out)
+        }
+
+        /// Lane-wise `*self = b * c + *self`, by the receiver.
+        ///
+        /// Note that the operand order differs from [`mul_add`](Self::mul_add):
+        /// the accumulator is the receiver, matching `self += b * c`. The
+        /// evaluation strategy follows the same `use_libm_fma` feature as
+        /// [`mul_add`](Self::mul_add).
+        #[inline(always)]
+        pub fn fma_from(&mut self, b: Self, c: Self) {
+            for ((b, c), o) in b.0.iter().zip(c.0.iter()).zip(self.0.iter_mut()) {
+                *o = *b * *c + *o;
+            }
+        }
+    }
+
+    /// Fused variant selected by the `use_libm_fma` cargo feature; see the
+    /// default-mode docs above (and docs/adr/0005) for the trade-off.
+    #[cfg(feature = "use_libm_fma")]
     impl<T, const N: usize> _vec_<T, N>
     where
         T: MulAdd<Output = T> + Copy,
     {
-        /// Lane-wise fused multiply-add: `self * b + c`.
+        /// Lane-wise fused multiply-add: `self * b + c` with a single
+        /// rounding per lane.
         ///
-        /// This performs a single rounding per lane if the element's
-        /// [`MulAdd`] is fused (as for `f32`/`f64`).
+        /// Lowers to the element's [`MulAdd`]: a hardware FMA instruction on
+        /// capable targets with no extra flags, or a correctly-rounded libm
+        /// `fma` call (slow: ~4.6x a separated mul+add) on targets without
+        /// FMA.
         #[inline(always)]
         pub fn mul_add(self, b: Self, c: Self) -> Self {
             let mut out = self.0;
@@ -251,7 +301,7 @@ mod _mod_ {
             Self(out)
         }
 
-        /// Lane-wise `*self = b * c + *self` (fused).
+        /// Lane-wise fused `*self = b * c + *self`, by the receiver.
         ///
         /// Note that the operand order differs from [`mul_add`](Self::mul_add):
         /// the accumulator is the receiver, matching `self += b * c`.

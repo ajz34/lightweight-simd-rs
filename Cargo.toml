@@ -21,6 +21,11 @@ half = { version = "2", features = ["num-traits"] }
 [features]
 complex = ["dep:num-complex"]
 half = ["dep:half"]
+# mul_add/fma_from via the element's fused MulAdd: single rounding, hardware
+# FMA with no extra flags, slow correctly-rounded libm fma on pre-FMA targets.
+# Default (off): separated mul+add; fuses to hardware FMA only under
+# -C llvm-args=-fp-contract=fast. See docs/adr/0005.
+use_libm_fma = []
 
 [profile.dev]
 opt-level = 2

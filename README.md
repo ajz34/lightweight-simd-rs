@@ -23,6 +23,12 @@ This project will probably extensively use AI code agent for development.
 - If intrinsics are not avoidable (default rust compiler does not correctly optimize), then a cargo feature (compile-time instead of runtime-dispatch) `with-intrinsics` will perform optimize by `cfg` attribute with `target-cpu`.
 - A cargo feature `with-full-intrinsics` will always introduce intrinsics for optimization, but this is not the best/intended way of using this crate.
 
+## Notes on FMA
+
+- `mul_add`/`fma_from` evaluation modes (see `docs/adr/0005`):
+  - default: separated mul+add — two roundings per lane, never calls libm. On FMA-capable targets it still fuses into one hardware FMA instruction when compiled with `-C llvm-args=-fp-contract=fast` (recommended for heavy multiply-add workloads; the fused form is also faster there).
+  - `use_libm_fma` (non-default feature): the element's fused `MulAdd` — single rounding per lane; a hardware FMA instruction with no extra flags; a slow correctly-rounded libm `fma` on pre-FMA targets (measured ~4.6x slower than separated there).
+
 ## Verifying codegen
 
 A static checker (no runtime benchmarking) verifies the auto-vectorization
@@ -37,9 +43,12 @@ python3 scripts/check_asm.py --dump probe_mul_add_f64x8 v3    # inspect one body
 ```
 
 Checks that cannot hold at a target level are informational notes rather than
-failures (e.g. there is no FMA instruction at `x86-64-v2`, so `mul_add` lowers
-to scalar `fma` calls; `f16` arithmetic via the `half` crate stays scalar on
-x86). Emitted assembly lands in `target/asm/` (gitignored). See
+failures (e.g. `f16` arithmetic via the `half` crate stays scalar on x86). The
+`mul_add` policy of `docs/adr/0005` is encoded too: default rows assert
+separated mul+add, the `v3c` row asserts fusion under
+`-C llvm-args=-fp-contract=fast`, and the `v2f`/`v3f` rows cover the
+`use_libm_fma` feature (libm calls vs hardware `vfmadd`). Emitted assembly
+lands in `target/asm/` (gitignored). See
 `docs/adr/0004-codegen-verification-by-assembly-matching.md`.
 
 Architectures other than x86-64 are scaffolded in the same script: each

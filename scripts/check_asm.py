@@ -59,14 +59,18 @@ def info(note, need=None):
 # x86-64: rows and expectations (the reference table).
 # --------------------------------------------------------------------------
 
-# (row name, -C target-cpu, extra rustc flags)
+# (row name, -C target-cpu, extra RUSTFLAGS, extra cargo args)
 X86_ROWS = [
-    ("baseline", "x86-64", []),
-    ("v2", "x86-64-v2", []),
-    ("v3", "x86-64-v3", []),
-    ("v4", "x86-64-v4", []),
-    ("native", "native", []),
-    ("v3c", "x86-64-v3", ["-C", "llvm-args=-fp-contract=fast"]),
+    ("baseline", "x86-64", [], []),
+    ("v2", "x86-64-v2", [], []),
+    ("v3", "x86-64-v3", [], []),
+    ("v4", "x86-64-v4", [], []),
+    ("native", "native", [], []),
+    # fp-contract variant: separated mul+add expressions fuse to hardware FMA
+    ("v3c", "x86-64-v3", ["-C", "llvm-args=-fp-contract=fast"], []),
+    # use_libm_fma feature variant: MulAdd lowering (libm at v2, vfmadd at v3)
+    ("v2f", "x86-64-v2", [], ["--features", "use_libm_fma"]),
+    ("v3f", "x86-64-v3", [], ["--features", "use_libm_fma"]),
 ]
 
 # Instruction-family regexes. `v?` absorbs the VEX prefix difference between
@@ -144,25 +148,37 @@ EXPECT_X86 = {
         "v4": req(need={r"v?(roundpd|rndscalepd)": 1}),
         "native": req(need={r"v?(roundpd|rndscalepd)": 1}),
     },
+    # mul_add default mode: separated mul+add everywhere (fuses only under
+    # fp-contract); use_libm_fma rows (v2f/v3f) switch to the MulAdd lowering.
     "probe_mul_add_f64x8": {
         "baseline": req(forbid=["vfmadd"]),  # negative control
-        "v2": info("no FMA ISA: scalar libm fma fallback"),
-        "v3": req(need={"vfmadd": R2}),
-        "v4": req(need={"vfmadd": 1}),
-        "native": req(need={"vfmadd": 1}),
+        "v2": req(need={r"v?mulpd": 4, r"v?addpd": 4}),
+        "v3": req(need={r"v?mulpd": R2, r"v?addpd": R2}),
+        "v4": req(need={r"v?mulpd": 1, r"v?addpd": 1}),
+        "native": req(need={r"v?mulpd": 1, r"v?addpd": 1}),
+        "v3c": req(need={"vfmadd": R2}),
+        "v2f": info("use_libm_fma: scalar libm fma fallback "
+                    "(no FMA ISA; ~4.6x slower than separated)", need={"callq": 0}),
+        "v3f": req(need={"vfmadd": R2}),
     },
     "probe_fma_from_f64x8": {
         "baseline": req(forbid=["vfmadd"]),
-        "v2": info("no FMA ISA: scalar libm fma fallback"),
-        "v3": req(need={"vfmadd": R2}),
-        "v4": req(need={"vfmadd": 1}),
-        "native": req(need={"vfmadd": 1}),
+        "v2": req(need={r"v?mulpd": 4, r"v?addpd": 4}),
+        "v3": req(need={r"v?mulpd": R2, r"v?addpd": R2}),
+        "v4": req(need={r"v?mulpd": 1, r"v?addpd": 1}),
+        "native": req(need={r"v?mulpd": 1, r"v?addpd": 1}),
+        "v3c": req(need={"vfmadd": R2}),
+        "v2f": info("use_libm_fma: scalar libm fma fallback", need={"callq": 0}),
+        "v3f": req(need={"vfmadd": R2}),
     },
     "probe_mul_add_f64x16": {
-        "v2": info("no FMA ISA: scalar libm fma fallback"),
-        "v3": req(need={"vfmadd": 4}),
-        "v4": req(need={"vfmadd": 2}),
-        "native": req(need={"vfmadd": 2}),
+        "v2": req(need={r"v?mulpd": 8, r"v?addpd": 8}),
+        "v3": req(need={r"v?mulpd": 4, r"v?addpd": 4}),
+        "v4": req(need={r"v?mulpd": 2, r"v?addpd": 2}),
+        "native": req(need={r"v?mulpd": 2, r"v?addpd": 2}),
+        "v3c": req(need={"vfmadd": 4}),
+        "v2f": info("use_libm_fma: scalar libm fma fallback", need={"callq": 0}),
+        "v3f": req(need={"vfmadd": 4}),
     },
     "probe_add_f32x16": {
         "v2": req(need={r"v?addps": 4}),
@@ -171,10 +187,13 @@ EXPECT_X86 = {
         "native": req(need={r"v?addps": 1}),
     },
     "probe_mul_add_f32x16": {
-        "v2": info("no FMA ISA: scalar libm fma fallback"),
-        "v3": req(need={"vfmadd": R2}),
-        "v4": req(need={"vfmadd": 1}),
-        "native": req(need={"vfmadd": 1}),
+        "v2": req(need={r"v?mulps": 4, r"v?addps": 4}),
+        "v3": req(need={r"v?mulps": R2, r"v?addps": R2}),
+        "v4": req(need={r"v?mulps": 1, r"v?addps": 1}),
+        "native": req(need={r"v?mulps": 1, r"v?addps": 1}),
+        "v3c": req(need={"vfmadd": R2}),
+        "v2f": info("use_libm_fma: scalar libm fmaf fallback", need={"callq": 0}),
+        "v3f": req(need={"vfmadd": R2}),
     },
     "probe_add_i64x8": {
         "v2": req(need={r"v?paddq": 2}),
@@ -233,6 +252,8 @@ EXPECT_X86 = {
     "probe_expr_fma_f64x8": {
         "v3": req(forbid=["vfmadd"]),  # default: expressions must not fuse
         "v3c": req(need={"vfmadd": 1}),  # with the flag: they do
+        # the feature only changes the mul_add methods, not plain expressions
+        "v3f": req(forbid=["vfmadd"]),
     },
     "probe_f16_add_f16x8": {
         row: info("known-scalar on x86: half soft-float (no f16 arith ISA)")
@@ -253,8 +274,8 @@ EXPECT_X86 = {
 # --------------------------------------------------------------------------
 
 AARCH64_ROWS = [
-    ("generic", "generic", []),
-    ("native", "native", []),
+    ("generic", "generic", [], []),
+    ("native", "native", [], []),
 ]
 
 ARCHES = {
@@ -294,12 +315,12 @@ def compile_rows(arch, rows):
     # build's fingerprints
     env = {**os.environ, "CARGO_TARGET_DIR": str(ROOT / "target" / "asm-build")}
     out = {}
-    for name, cpu, extra in rows:
+    for name, cpu, extra, cargo_extra in rows:
         asm_path = ASM_DIR / f"{arch}-{name}.s"
         env["RUSTFLAGS"] = " ".join([f"-Ctarget-cpu={cpu}", *extra])
         sh(["cargo", "rustc",
             "--manifest-path", str(PROBES_MANIFEST),
-            "--release",
+            "--release", *cargo_extra,
             "--", "--emit", f"asm={asm_path}"], env=env)
         out[name] = asm_path
     return out
@@ -387,7 +408,7 @@ def cmd_hist(row, arch):
 # --------------------------------------------------------------------------
 
 def run_checks(arch, expect, rows):
-    row_order = [name for name, _, _ in rows]
+    row_order = [name for name, *_ in rows]
     asm_paths = compile_rows(arch, rows)
     all_bodies = {row: split_bodies(path) for row, path in asm_paths.items()}
     n_probes = len(all_bodies[row_order[0]])

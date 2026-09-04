@@ -15,3 +15,6 @@ path = "../probes.rs"
 
 [dependencies]
 lightweight-simd = { path = "../../..", features = ["complex", "half"] }
+
+[features]
+use_libm_fma = ["lightweight-simd/use_libm_fma"]
