@@ -62,4 +62,8 @@ mode — probes compile and report, nothing fails. `--hist` prints per-probe
 instruction histograms and `--dump` single bodies, which is how a table for a
 new architecture gets authored on that architecture's host.
 
+Both populated tables run in CI (`.github/workflows/`): the x86-64 matrix on
+an ubuntu runner and the aarch64 matrix on a GitHub-provided Apple Silicon
+macOS runner, alongside fmt/clippy and the test suite.
+
 

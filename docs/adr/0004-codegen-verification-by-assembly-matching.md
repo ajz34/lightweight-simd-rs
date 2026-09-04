@@ -64,4 +64,7 @@ harness can go red.
   comparisons feeding only reductions get scalarized by LLVM.
 - Adding or changing an operation should update the probe table in the same
   change. The script runs manually (`python3 scripts/check_asm.py`,
-  `--arch` to select, `--dump`/`--hist` to inspect).
+  `--arch` to select, `--dump`/`--hist` to inspect) and in CI on every push
+  to main and PR: x86_64 on an ubuntu runner, aarch64 on a GitHub-provided
+  Apple Silicon macOS runner (the workflows pin the runner arch, since the
+  cross-emission guard exits 0 and would otherwise mask a skipped matrix).
