@@ -11,10 +11,10 @@ extracts each probe body by symbol label, and asserts the expected vector
 instruction families are present (with width-aware minimum counts).
 
 Architectures are data-driven: `ARCHES` maps each architecture to its compile
-rows and its probe -> row expectation table. x86_64 is fully populated;
-aarch64 is scaffolded (rows reserved, expectations empty) and runs in
-informational mode — probes compile and report, nothing fails — until
-somebody authors a table for it (run on that arch, then use --dump/--hist).
+rows and its probe -> row expectation table. x86_64 rows walk the ISA ladder
+(baseline SSE2 -> AVX2 -> AVX-512); aarch64 NEON is baseline, so its rows are
+`generic`/`native` plus the fp-contract and use_libm_fma variant rows, and its
+counts pin the 128-bit v.2d/v.4s shapes (verified on an Apple-Silicon host).
 Adding an architecture means adding one ARCHES entry, nothing else.
 
 Expectation patterns are regexes matched case-insensitively against the whole
@@ -25,7 +25,7 @@ vectorization loss goes red.
 
 Usage:
   python3 scripts/check_asm.py                      # host arch, full matrix
-  python3 scripts/check_asm.py --arch aarch64       # info mode (if scaffolded)
+  python3 scripts/check_asm.py --arch aarch64       # explicit arch
   python3 scripts/check_asm.py --dump PROBE [ROW] [ARCH]
   python3 scripts/check_asm.py --hist [ROW] [ARCH]  # authoring aid
 Exit:  0 all REQUIRED checks pass (or info mode), 1 any REQUIRED miss,
@@ -269,21 +269,181 @@ EXPECT_X86 = {
 }
 
 # --------------------------------------------------------------------------
-# aarch64: rows reserved, expectation table deliberately unpopulated.
-# NEON is the aarch64 baseline, so there is no scalar-only negative-control
-# row. Extend with concrete microarchitectures (neoverse-n1/v2, apple-*) or
-# target-feature rows (+sve, +fp16) when authoring expectations; family
-# regexes will look like fadd/fmul/fmla (v.2d/v.4s/v.8h) shapes.
+# aarch64: rows and expectations.
 # --------------------------------------------------------------------------
 
+# NEON (armv8.0) is the aarch64 baseline, so — unlike x86-64's ISA ladder —
+# every microarchitecture vectorizes these probes the same 128-bit way and
+# there is no scalar-only negative-control row; `generic` covers all named
+# -Ctarget-cpu values (neoverse-*, apple-* would be duplicate columns). The
+# negative control for fused codegen is instead expr_fma's forbid, and the
+# ladder's job is done by two variant rows: genc (fp-contract, expressions
+# fuse) and genf (use_libm_fma, must stay hardware fmla — never libm).
 AARCH64_ROWS = [
     ("generic", "generic", [], []),
     ("native", "native", [], []),
+    # fp-contract variant: separated mul+add expressions fuse to hardware FMA
+    ("genc", "generic", ["-C", "llvm-args=-fp-contract=fast"], []),
+    # use_libm_fma feature variant: fused is already the aarch64 default
+    # (fmla is baseline), so this must not degrade into libm fma calls
+    ("genf", "generic", [], ["--features", "use_libm_fma"]),
 ]
+
+# aarch64 f64x8/f32x16/i64x8 are 4 x v.2d/v.4s lanes at every row (NEON's
+# fixed 128-bit vectors); f64x16 spans double that. V4 = that per-op count.
+V4 = 4
+
+# Selection/copysign family: LLVM picks among bit-insert forms per lane group.
+SELF = r"(bif|bsl|bit)\.16b"
+# libm fma call (would appear as bl _fma on Mach-O, bl fma on ELF)
+LIBM_FMA = r"\bbl\s+_?fma"
+
+EXPECT_AARCH64 = {
+    "probe_add_f64x8": {
+        "generic": req(need={r"fadd\.2d": V4}),
+        "native": req(need={r"fadd\.2d": V4}),
+    },
+    "probe_mul_f64x8": {
+        "generic": req(need={r"fmul\.2d": V4}),
+        "native": req(need={r"fmul\.2d": V4}),
+    },
+    "probe_div_f64x8": {
+        "generic": req(need={r"fdiv\.2d": V4}),
+        "native": req(need={r"fdiv\.2d": V4}),
+    },
+    "probe_neg_f64x8": {
+        "generic": req(need={r"fneg\.2d": V4}),
+        "native": req(need={r"fneg\.2d": V4}),
+    },
+    # Rust min/max (NaN-avoiding) lower to fminnm/fmaxnm plus per-lane fixups,
+    # so min runs well over the full-lane count; max carries min's fixups too.
+    "probe_min_f64x8": {
+        "generic": req(need={r"fminnm": V4}),
+        "native": req(need={r"fminnm": V4}),
+    },
+    "probe_max_f64x8": {
+        "generic": req(need={r"fmaxnm": V4}),
+        "native": req(need={r"fmaxnm": V4}),
+    },
+    "probe_copysign_f64x8": {
+        "generic": req(need={SELF: 1}),
+        "native": req(need={SELF: 1}),
+    },
+    "probe_sqrt_f64x8": {
+        "generic": req(need={r"fsqrt\.2d": V4}),
+        "native": req(need={r"fsqrt\.2d": V4}),
+    },
+    "probe_abs_f64x8": {
+        "generic": req(need={r"fabs\.2d": V4}),
+        "native": req(need={r"fabs\.2d": V4}),
+    },
+    # vector rounding is baseline NEON (frint*), unlike SSE2's libm calls
+    "probe_floor_f64x8": {
+        "generic": req(need={r"frint": V4}),
+        "native": req(need={r"frint": V4}),
+    },
+    # mul_add default mode: FMA (fmla) is aarch64 baseline, so the fused path
+    # is compiled in at every row (cfg split per docs/adr/0005); genf shows
+    # use_libm_fma changes nothing here — hardware fmla, never libm calls.
+    "probe_mul_add_f64x8": {
+        "generic": req(need={r"fmla\.2d": V4}, forbid=[LIBM_FMA]),
+        "native": req(need={r"fmla\.2d": V4}, forbid=[LIBM_FMA]),
+        "genc": req(need={r"fmla\.2d": V4}),
+        "genf": req(need={r"fmla\.2d": V4}, forbid=[LIBM_FMA]),
+    },
+    "probe_fma_from_f64x8": {
+        "generic": req(need={r"fmla\.2d": V4}, forbid=[LIBM_FMA]),
+        "native": req(need={r"fmla\.2d": V4}, forbid=[LIBM_FMA]),
+        "genc": req(need={r"fmla\.2d": V4}),
+        "genf": req(need={r"fmla\.2d": V4}, forbid=[LIBM_FMA]),
+    },
+    "probe_mul_add_f64x16": {
+        "generic": req(need={r"fmla\.2d": 8}, forbid=[LIBM_FMA]),
+        "native": req(need={r"fmla\.2d": 8}, forbid=[LIBM_FMA]),
+        "genc": req(need={r"fmla\.2d": 8}),
+        "genf": req(need={r"fmla\.2d": 8}, forbid=[LIBM_FMA]),
+    },
+    "probe_add_f32x16": {
+        "generic": req(need={r"fadd\.4s": V4}),
+        "native": req(need={r"fadd\.4s": V4}),
+    },
+    "probe_mul_add_f32x16": {
+        "generic": req(need={r"fmla\.4s": V4}, forbid=[LIBM_FMA]),
+        "native": req(need={r"fmla\.4s": V4}, forbid=[LIBM_FMA]),
+        "genc": req(need={r"fmla\.4s": V4}),
+        "genf": req(need={r"fmla\.4s": V4}, forbid=[LIBM_FMA]),
+    },
+    "probe_add_i64x8": {
+        "generic": req(need={r"add\.2d": V4}),
+        "native": req(need={r"add\.2d": V4}),
+    },
+    "probe_bitwise_i32x16": {
+        "generic": req(need={r"and\.16b": 1, r"orr\.16b": 1, r"eor\.16b": 1}),
+        "native": req(need={r"and\.16b": 1, r"orr\.16b": 1, r"eor\.16b": 1}),
+    },
+    # vector i64 variable shifts are baseline NEON (ushl for <<, sshl with a
+    # negated count for >>) — the x86 v2 row's scalar fallback has no analog
+    "probe_shift_i64x8": {
+        "generic": req(need={r"[su]shl\.2d": V4}),
+        "native": req(need={r"[su]shl\.2d": V4}),
+    },
+    # comparisons + select currently scalarize to branch-free per-lane
+    # fcmp/fcsel (bool-array masks); LLVM does not pick fcmgt+bsl here
+    "probe_cmp_select_f64x8": {
+        row: info("scalarized: branch-free per-lane fcmp/fcsel "
+                  "(no NEON fcmgt+bsl)", need={"fcmp": 0, "fcsel": 0})
+        for row in ("generic", "native")
+    },
+    "probe_eq_any_all_f64x8": {
+        row: info("scalarized: branch-free per-lane fcmp/csel",
+                  need={"fcmp": 0, "csel": 0})
+        for row in ("generic", "native")
+    },
+    # NEON loads/stores are alignment-agnostic: ldr/ldp q ... on an unaligned
+    # &[f64] is the movupd analog, ldp q on the aligned &f64x8 the movapd one
+    "probe_slice_io_unaligned": {
+        "generic": req(need={r"ld[rp]\s+q": 1, r"fmul\.2d": V4}),
+        "native": req(need={r"ld[rp]\s+q": 1, r"fmul\.2d": V4}),
+    },
+    "probe_slice_io_aligned": {
+        "generic": req(need={r"ld[rp]\s+q": 1, r"fadd\.2d": V4}),
+        "native": req(need={r"ld[rp]\s+q": 1, r"fadd\.2d": V4}),
+    },
+    "probe_store_slice_partial": {
+        row: info("runtime tail length: no stable canonical form "
+                  "(loop-shaped stores not guaranteed)")
+        for row in ("generic", "native")
+    },
+    # INFORMATIONAL probes
+    "probe_reduce_sum_f64x8": {
+        row: info("strict lane order: scalar fadd d chain",
+                  need={r"fadd\sd": 0})
+        for row in ("generic", "native")
+    },
+    "probe_expr_fma_f64x8": {
+        "generic": req(forbid=["fmla"]),  # default: expressions must not fuse
+        "native": req(forbid=["fmla"]),
+        "genc": req(need={r"fmla\.2d": V4}),  # with the flag: they do
+        # the feature only changes the mul_add methods, not plain expressions
+        "genf": req(forbid=["fmla"]),
+    },
+    "probe_f16_add_f16x8": {
+        "generic": info("soft-float via half: GPR bit work "
+                        "(no f16 arith at armv8.0 generic)"),
+        "native": info("native-but-scalar: per-lane scalar fadd h "
+                       "(half's intrinsic path does not auto-vectorize)",
+                       need={r"fadd\sh": 0}),
+    },
+    "probe_complex_mul_c64x8": {
+        row: info("vectorized: fmul/ext-shuffle/fsub/fadd family "
+                  "(no fcnmla contraction)", need={r"fmul\.2d": 0})
+        for row in ("generic", "native")
+    },
+}
 
 ARCHES = {
     "x86_64": {"rows": X86_ROWS, "expect": EXPECT_X86},
-    "aarch64": {"rows": AARCH64_ROWS, "expect": {}},
+    "aarch64": {"rows": AARCH64_ROWS, "expect": EXPECT_AARCH64},
 }
 
 
@@ -334,15 +494,17 @@ def split_bodies(asm_path):
 
     Emitted assembly has no column-0 .size directives; each function's extent
     runs from its `probe_x:` label to the next `.globl` (the following
-    function's export) or to end of file.
+    function's export) or to end of file. Mach-O (macOS) prefixes every
+    symbol with `_`, which is stripped so keys match the expectation table.
     """
     bodies = {}
     current, buf = None, []
     for line in Path(asm_path).read_text().splitlines():
-        if re.fullmatch(r"probe_\w+:", line):
+        m = re.fullmatch(r"_?(probe_\w+):", line)
+        if m:
             if current:
                 bodies[current] = "\n".join(buf)
-            current, buf = line[:-1], []
+            current, buf = m.group(1), []
         elif current is not None:
             if line.startswith(".globl") or line.startswith(".size"):
                 bodies[current] = "\n".join(buf)
@@ -446,9 +608,8 @@ def run_checks(arch, expect, rows):
                     failures.append((probe, row, "probe body not found"))
                 continue
             if cell["tier"] == "info":
-                extra = ""
-                for pat in cell["need"]:
-                    extra = f" [{pat}={count(body, pat)}]"
+                extra = "".join(f" [{pat}={count(body, pat)}]"
+                                for pat in cell["need"])
                 results[(probe, row)] = ("info", extra)
                 notes.append(f"{probe}@{row}: {cell['note']}{extra}")
                 continue

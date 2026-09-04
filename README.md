@@ -43,19 +43,23 @@ python3 scripts/check_asm.py --dump probe_mul_add_f64x8 v3    # inspect one body
 
 Checks that cannot hold at a target level are informational notes rather than
 failures (e.g. `f16` arithmetic via the `half` crate stays scalar on x86). The
-`mul_add` policy of `docs/adr/0005` is encoded too: v3+ rows assert hardware
-`vfmadd`, v2/baseline rows assert separated mul+add (baseline also forbids
-`vfmadd` as a negative control), the `v3c` row shows the separated expression
-fusing under `-C llvm-args=-fp-contract=fast`, and the `v2f`/`v3f` rows cover
-the `use_libm_fma` feature (libm calls vs hardware `vfmadd`). Emitted assembly
-lands in `target/asm/` (gitignored). See
+`mul_add` policy of `docs/adr/0005` is encoded too. On x86-64: v3+ rows assert
+hardware `vfmadd`, v2/baseline rows assert separated mul+add (baseline also
+forbids `vfmadd` as a negative control), the `v3c` row shows the separated
+expression fusing under `-C llvm-args=-fp-contract=fast`, and the `v2f`/`v3f`
+rows cover the `use_libm_fma` feature (libm calls vs hardware `vfmadd`). On
+aarch64 — where NEON's 128-bit vectors and `fmla` are baseline at every
+`-C target-cpu` — the `generic`/`native` rows assert the `v.2d`/`v.4s` shapes,
+and the `genc`/`genf` rows carry the same two variants (expressions fuse under
+fp-contract; `use_libm_fma` stays hardware `fmla`, never libm calls). Emitted
+assembly lands in `target/asm/` (gitignored). See
 `docs/adr/0004-codegen-verification-by-assembly-matching.md`.
 
-Architectures other than x86-64 are scaffolded in the same script: each
-architecture is one entry (compile rows + expectation table), and an
-architecture without expectations yet runs in informational mode — probes
-compile and report, nothing fails. `--hist` prints per-probe instruction
-histograms and `--dump` single bodies, which is how a table for a new
-architecture gets authored on that architecture's host.
+Architectures are data-driven in the same script: each architecture is one
+entry (compile rows + expectation table); x86-64 and aarch64 tables are
+populated, and an architecture without expectations yet runs in informational
+mode — probes compile and report, nothing fails. `--hist` prints per-probe
+instruction histograms and `--dump` single bodies, which is how a table for a
+new architecture gets authored on that architecture's host.
 
 

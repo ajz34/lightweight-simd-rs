@@ -70,6 +70,9 @@ double-rounded form by default.
   separated mul+add (baseline additionally forbids `vfmadd` as the
   negative control), the `v3c` row shows the separated expression fusing
   under `-C llvm-args=-fp-contract=fast`, and the `v2f`/`v3f` rows cover
-  the feature (libm calls vs hardware `vfmadd`). Plain `a*b+c`
+  the feature (libm calls vs hardware `vfmadd`). On aarch64 every row
+  asserts hardware `fmla` (baseline ISA there) and forbids libm `fma`
+  calls — including under the feature (`genf`), where x86 without the
+  FMA ISA would pay them. Plain `a*b+c`
   expressions are unaffected by all of this and stay unfused except under
   fp-contract.
