@@ -4,7 +4,7 @@
 //! types ([`Simd`] and its [`aligned`](crate::aligned) siblings).
 
 use core::ops::*;
-#[cfg(feature = "use_libm_fma")]
+#[cfg(any(feature = "use_libm_fma", target_arch = "aarch64", target_feature = "fma"))]
 use num_traits::MulAdd;
 use num_traits::{Float, Num, NumAssignOps};
 
@@ -235,52 +235,15 @@ mod _mod_ {
     /* #endregion */
 
     /* #region fused multiply-add */
+    //
+    // The fused path is selected when the compilation target has hardware
+    // FMA (`target_feature = "fma"`, which follows `-C target-cpu`, i.e. any
+    // x86-64-v3+ or `native` build; on aarch64 scalar/vector FMA is baseline)
+    // or when the `use_libm_fma` feature pins it on. Everything else —
+    // including architectures the predicate does not know — gets the fast
+    // separated form, never the slow libm software `fma`. See docs/adr/0005.
 
-    /// The evaluation strategy of [`mul_add`](Self::mul_add) and
-    /// [`fma_from`](Self::fma_from) is a compile-time choice; this is the
-    /// default. See the crate docs and docs/adr/0005 for the full trade-off.
-    #[cfg(not(feature = "use_libm_fma"))]
-    impl<T, const N: usize> _vec_<T, N>
-    where
-        T: Mul<Output = T> + Add<Output = T> + Copy,
-    {
-        /// Lane-wise multiply-add: `self * b + c`, evaluated as a separate
-        /// multiply and add (two roundings per lane).
-        ///
-        /// This is the default mode. On targets without hardware FMA it
-        /// avoids the slow software-fused libm `fma` calls (measured ~4.6x
-        /// slower per lane there); on FMA-capable targets the expression
-        /// still fuses into a single hardware FMA instruction when compiled
-        /// with `-C llvm-args=-fp-contract=fast`. The non-default cargo
-        /// feature `use_libm_fma` switches to the element's fused `MulAdd`
-        /// instead: single rounding, hardware FMA without extra flags, slow
-        /// libm fallback on pre-FMA targets.
-        #[inline(always)]
-        pub fn mul_add(self, b: Self, c: Self) -> Self {
-            let mut out = self.0;
-            for ((o, b), c) in out.iter_mut().zip(b.0).zip(c.0) {
-                *o = *o * b + c;
-            }
-            Self(out)
-        }
-
-        /// Lane-wise `*self = b * c + *self`, by the receiver.
-        ///
-        /// Note that the operand order differs from [`mul_add`](Self::mul_add):
-        /// the accumulator is the receiver, matching `self += b * c`. The
-        /// evaluation strategy follows the same `use_libm_fma` feature as
-        /// [`mul_add`](Self::mul_add).
-        #[inline(always)]
-        pub fn fma_from(&mut self, b: Self, c: Self) {
-            for ((b, c), o) in b.0.iter().zip(c.0.iter()).zip(self.0.iter_mut()) {
-                *o = *b * *c + *o;
-            }
-        }
-    }
-
-    /// Fused variant selected by the `use_libm_fma` cargo feature; see the
-    /// default-mode docs above (and docs/adr/0005) for the trade-off.
-    #[cfg(feature = "use_libm_fma")]
+    #[cfg(any(feature = "use_libm_fma", target_arch = "aarch64", target_feature = "fma"))]
     impl<T, const N: usize> _vec_<T, N>
     where
         T: MulAdd<Output = T> + Copy,
@@ -288,10 +251,14 @@ mod _mod_ {
         /// Lane-wise fused multiply-add: `self * b + c` with a single
         /// rounding per lane.
         ///
-        /// Lowers to the element's [`MulAdd`]: a hardware FMA instruction on
-        /// capable targets with no extra flags, or a correctly-rounded libm
-        /// `fma` call (slow: ~4.6x a separated mul+add) on targets without
-        /// FMA.
+        /// This is the default on targets with hardware FMA (x86 built with
+        /// `-C target-cpu` of `x86-64-v3` or higher, `native`, and all
+        /// aarch64), where it lowers to one FMA instruction per register
+        /// with no extra flags — and is also faster than a separated
+        /// multiply and add there. The non-default cargo feature
+        /// `use_libm_fma` selects this path on *every* target, accepting a
+        /// correctly-rounded but slow libm `fma` call (~4.6x a separated
+        /// mul+add) where hardware FMA is absent.
         #[inline(always)]
         pub fn mul_add(self, b: Self, c: Self) -> Self {
             let mut out = self.0;
@@ -309,6 +276,42 @@ mod _mod_ {
         pub fn fma_from(&mut self, b: Self, c: Self) {
             for ((b, c), o) in b.0.iter().zip(c.0.iter()).zip(self.0.iter_mut()) {
                 *o = MulAdd::mul_add(*b, *c, *o);
+            }
+        }
+    }
+
+    #[cfg(not(any(feature = "use_libm_fma", target_arch = "aarch64", target_feature = "fma")))]
+    impl<T, const N: usize> _vec_<T, N>
+    where
+        T: Mul<Output = T> + Add<Output = T> + Copy,
+    {
+        /// Lane-wise multiply-add: `self * b + c`, evaluated as a separate
+        /// multiply and add (two roundings per lane).
+        ///
+        /// This is the fallback on targets without hardware FMA (generic
+        /// x86-64, `x86-64-v2`), where it avoids the slow software-fused
+        /// libm `fma` calls; it also fuses into a single hardware FMA
+        /// instruction when compiled with `-C llvm-args=-fp-contract=fast`.
+        /// Enable the `use_libm_fma` feature to get the single-rounding
+        /// fused form on such targets instead.
+        #[inline(always)]
+        pub fn mul_add(self, b: Self, c: Self) -> Self {
+            let mut out = self.0;
+            for ((o, b), c) in out.iter_mut().zip(b.0).zip(c.0) {
+                *o = *o * b + c;
+            }
+            Self(out)
+        }
+
+        /// Lane-wise `*self = b * c + *self`, by the receiver.
+        ///
+        /// Note that the operand order differs from [`mul_add`](Self::mul_add):
+        /// the accumulator is the receiver, matching `self += b * c`. The
+        /// evaluation strategy is the same as [`mul_add`](Self::mul_add)'s.
+        #[inline(always)]
+        pub fn fma_from(&mut self, b: Self, c: Self) {
+            for ((b, c), o) in b.0.iter().zip(c.0.iter()).zip(self.0.iter_mut()) {
+                *o = *b * *c + *o;
             }
         }
     }

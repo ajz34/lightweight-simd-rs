@@ -20,14 +20,13 @@ This project will probably extensively use AI code agent for development.
 ## More detailed scopes
 
 - We will try to check if this lightweight, non-intrinsic code can emit correct SIMD assembly with `target-cpu` supported intrinsics. We will try to make code clean and easy, but extensive testing to make sure effectiveness.
-- If intrinsics are not avoidable (default rust compiler does not correctly optimize), then a cargo feature (compile-time instead of runtime-dispatch) `with-intrinsics` will perform optimize by `cfg` attribute with `target-cpu`.
-- A cargo feature `with-full-intrinsics` will always introduce intrinsics for optimization, but this is not the best/intended way of using this crate.
+- The originally planned intrinsics escape hatch (cargo features `with-intrinsics` / `with-full-intrinsics`) is dropped: the assembly-verification framework shows the portable code vectorizes everywhere it matters (see "Verifying codegen"). If a genuine vectorization gap ever appears on an operation users care about, the right-sized fix is a per-op `cfg(target_feature)` patch (note: `cfg(target_feature)` follows `-C target-cpu`), not a general intrinsics layer.
 
 ## Notes on FMA
 
-- `mul_add`/`fma_from` evaluation modes (see `docs/adr/0005`):
-  - default: separated mul+add — two roundings per lane, never calls libm. On FMA-capable targets it still fuses into one hardware FMA instruction when compiled with `-C llvm-args=-fp-contract=fast` (recommended for heavy multiply-add workloads; the fused form is also faster there).
-  - `use_libm_fma` (non-default feature): the element's fused `MulAdd` — single rounding per lane; a hardware FMA instruction with no extra flags; a slow correctly-rounded libm `fma` on pre-FMA targets (measured ~4.6x slower than separated there).
+- `mul_add`/`fma_from` evaluation (see `docs/adr/0005`):
+  - default: fused `MulAdd` — single rounding, one hardware FMA instruction per register, no flags — where the compilation target has hardware FMA (x86 with `-C target-cpu` of `x86-64-v3`+ or `native`; all aarch64). On targets without (generic x86-64, `x86-64-v2`, unknown architectures): separated mul+add — two roundings per lane, never the slow libm software `fma` (measured ~4.6x slower than separated there), and fuses back to a hardware FMA instruction under `-C llvm-args=-fp-contract=fast`.
+  - `use_libm_fma` (non-default feature): pins the fused form on every target — single-rounding results that are bit-identical across build targets, at the cost of libm software `fma` calls where hardware FMA is absent.
 
 ## Verifying codegen
 
@@ -44,10 +43,11 @@ python3 scripts/check_asm.py --dump probe_mul_add_f64x8 v3    # inspect one body
 
 Checks that cannot hold at a target level are informational notes rather than
 failures (e.g. `f16` arithmetic via the `half` crate stays scalar on x86). The
-`mul_add` policy of `docs/adr/0005` is encoded too: default rows assert
-separated mul+add, the `v3c` row asserts fusion under
-`-C llvm-args=-fp-contract=fast`, and the `v2f`/`v3f` rows cover the
-`use_libm_fma` feature (libm calls vs hardware `vfmadd`). Emitted assembly
+`mul_add` policy of `docs/adr/0005` is encoded too: v3+ rows assert hardware
+`vfmadd`, v2/baseline rows assert separated mul+add (baseline also forbids
+`vfmadd` as a negative control), the `v3c` row shows the separated expression
+fusing under `-C llvm-args=-fp-contract=fast`, and the `v2f`/`v3f` rows cover
+the `use_libm_fma` feature (libm calls vs hardware `vfmadd`). Emitted assembly
 lands in `target/asm/` (gitignored). See
 `docs/adr/0004-codegen-verification-by-assembly-matching.md`.
 

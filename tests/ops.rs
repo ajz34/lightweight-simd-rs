@@ -3,10 +3,10 @@
 //! Correctness tests for bitwise/shift operators, fused multiply-add, float
 //! functions, comparisons/masks, and reductions.
 
-#[cfg(not(feature = "use_libm_fma"))]
+#[cfg(not(any(feature = "use_libm_fma", target_arch = "aarch64", target_feature = "fma")))]
 use core::ops::{Add, Mul};
 use core::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign};
-#[cfg(feature = "use_libm_fma")]
+#[cfg(any(feature = "use_libm_fma", target_arch = "aarch64", target_feature = "fma"))]
 use num_traits::MulAdd;
 use num_traits::{Float, Num};
 
@@ -54,23 +54,10 @@ fn shifts_i64() {
 }
 
 /// Reference and crate method must agree under whichever evaluation mode the
-/// crate was built in: default = separated `a * b + c`, `use_libm_fma` =
-/// fused `MulAdd::mul_add`.
-#[cfg(not(feature = "use_libm_fma"))]
-fn check_fused<T, const N: usize>(a_mk: &impl Fn(usize) -> T, b_mk: &impl Fn(usize) -> T)
-where
-    T: Mul<Output = T> + Add<Output = T> + Copy + PartialEq + std::fmt::Debug,
-{
-    let a = Simd::<T, N>::from_fn(a_mk);
-    let b = Simd::<T, N>::from_fn(b_mk);
-    let c = Simd::<T, N>::from_fn(|i| a_mk(i + 7));
-    assert_eq!(a.mul_add(b, c).to_array(), core::array::from_fn(|i| a_mk(i) * b_mk(i) + a_mk(i + 7)));
-    let mut acc = c;
-    acc.fma_from(b, a);
-    assert_eq!(acc.to_array(), core::array::from_fn(|i| b_mk(i) * a_mk(i) + a_mk(i + 7)));
-}
-
-#[cfg(feature = "use_libm_fma")]
+/// crate was built in. The predicate mirrors src/ops.rs: fused `MulAdd` when
+/// the target has hardware FMA (or the `use_libm_fma` feature pins it on),
+/// separated `a * b + c` otherwise.
+#[cfg(any(feature = "use_libm_fma", target_arch = "aarch64", target_feature = "fma"))]
 fn check_fused<T, const N: usize>(a_mk: &impl Fn(usize) -> T, b_mk: &impl Fn(usize) -> T)
 where
     T: MulAdd<Output = T> + Copy + PartialEq + std::fmt::Debug,
@@ -82,6 +69,20 @@ where
     let mut acc = c;
     acc.fma_from(b, a);
     assert_eq!(acc.to_array(), core::array::from_fn(|i| MulAdd::mul_add(b_mk(i), a_mk(i), a_mk(i + 7))));
+}
+
+#[cfg(not(any(feature = "use_libm_fma", target_arch = "aarch64", target_feature = "fma")))]
+fn check_fused<T, const N: usize>(a_mk: &impl Fn(usize) -> T, b_mk: &impl Fn(usize) -> T)
+where
+    T: Mul<Output = T> + Add<Output = T> + Copy + PartialEq + std::fmt::Debug,
+{
+    let a = Simd::<T, N>::from_fn(a_mk);
+    let b = Simd::<T, N>::from_fn(b_mk);
+    let c = Simd::<T, N>::from_fn(|i| a_mk(i + 7));
+    assert_eq!(a.mul_add(b, c).to_array(), core::array::from_fn(|i| a_mk(i) * b_mk(i) + a_mk(i + 7)));
+    let mut acc = c;
+    acc.fma_from(b, a);
+    assert_eq!(acc.to_array(), core::array::from_fn(|i| b_mk(i) * a_mk(i) + a_mk(i + 7)));
 }
 
 #[test]
@@ -110,9 +111,11 @@ fn mul_add_rounding_mode() {
     let b = f64x8::splat(1.0 - 0.5 * f64::EPSILON);
     let c = f64x8::splat(0.5 * f64::EPSILON);
     let got = a.mul_add(b, c)[0].to_bits();
-    #[cfg(feature = "use_libm_fma")]
+    // predicate mirrors src/ops.rs (a plain `cargo test` builds for generic
+    // x86-64, so the default run takes the separated path on this host)
+    #[cfg(any(feature = "use_libm_fma", target_arch = "aarch64", target_feature = "fma"))]
     assert_eq!(got, 0x3ff0000000000001); // fused: 1 + 2^-52
-    #[cfg(not(feature = "use_libm_fma"))]
+    #[cfg(not(any(feature = "use_libm_fma", target_arch = "aarch64", target_feature = "fma")))]
     assert_eq!(got, 0x3ff0000000000000); // separated: rounds to 1.0
 }
 

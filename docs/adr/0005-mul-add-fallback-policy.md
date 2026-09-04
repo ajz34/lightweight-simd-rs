@@ -1,10 +1,10 @@
-# mul_add fallback: separated mul+add by default, libm-fused optional
+# mul_add: fused where the target has hardware FMA
 
 `mul_add`/`fma_from` lower to `llvm.fma`, which is a hardware FMA
 instruction on FMA-capable targets (no flags needed) but eight per-vector
 calls into libm's correctly-rounded software `fma` on targets without the
-FMA ISA. Measured on this host (f64x8, dependent accumulation chain,
-rustc nightly + glibc 2.43):
+FMA ISA. Measured on the reference host (f64x8, dependent accumulation
+chain, rustc nightly + glibc 2.43):
 
 | codegen | fused path (`llvm.fma`) | separated `a*b+c` |
 |--|--|--|
@@ -17,47 +17,59 @@ The two forms also differ numerically: single vs double rounding (e.g.
 `(1 + 2^-52) * (1 - 2^-53) + 2^-53` yields `1 + 2^-52` fused but `1.0`
 separated).
 
-Since `-C target-cpu` is not visible to `cfg` (only `-C target-feature`
-is), the strategy cannot be selected per-target inside the crate; it is a
-compile-time policy. The non-default cargo feature `use_libm_fma` selects
-it:
+## Decision
 
-- **default (feature off)**: `self * b + c` as separate multiply and add.
-  Bounds `Mul + Add`. Never calls libm. Fuses back to a hardware FMA
-  instruction on capable targets when the user compiles with
-  `-C llvm-args=-fp-contract=fast`.
-- **`use_libm_fma` (feature on)**: the element's `num_traits::MulAdd`.
-  Bounds `MulAdd`. Single rounding; hardware FMA with no extra flags; slow
-  correctly-rounded libm fallback on pre-FMA targets.
+The evaluation is selected at compile time by a cfg predicate:
+
+- **default**: the fused `num_traits::MulAdd` path when the compilation
+  target has hardware FMA — `target_feature = "fma"` (which follows
+  `-C target-cpu`, so any `x86-64-v3+` or `native` build) or aarch64
+  (scalar/vector FMA is baseline there). Otherwise — generic x86-64,
+  `x86-64-v2`, and any architecture the predicate does not know — a
+  separated `self * b + c` (bounds `Mul + Add`), which never degrades into
+  the slow libm calls. Unknown architectures therefore fail safe: fast,
+  correct, no libm.
+- **`use_libm_fma` feature** (non-default): pins the fused path on every
+  target, accepting the libm software `fma` where hardware is absent.
+  Use it when results must be bit-identical across build targets.
+
+Decision history: the first cut was always-fused; a second revision made
+separated the unconditional default with `use_libm_fma` opting into fused.
+That revision was superseded by this cfg-split because under the crate's
+recommended build (`-C target-cpu=native`) it shipped the *slower and*
+double-rounded form by default.
 
 ## Considered Options
 
-- **Always `llvm.fma` (the previous behavior)**: simplest and always
-  single-rounded, but ships a ~4.6x slowdown on every pre-FMA build.
-- **Always separated**: fast everywhere, but silently loses the fused
-  contract `mul_add` nominally promises, with no recourse.
-- **`cfg(target_feature = "fma")` split**: impossible — `-C target-cpu`
-  (the usual way users enable FMA) does not set `cfg(target_feature)`.
-- **Feature-gated policy (chosen)**: one global switch, matching the
-  crate's no-runtime-dispatch principle; both modes verified by the
-  assembly framework (rows `v2f`/`v3f` for the feature, `v3c` for the
-  fp-contract recovery path).
+- **Always `llvm.fma`**: simplest and always single-rounded, but ships a
+  ~4.6x slowdown on every pre-FMA build.
+- **Always separated, feature to fuse**: no libm anywhere, but a footgun
+  under recommended builds (slower and double-rounded on FMA hardware
+  unless the user also sets `-C llvm-args=-fp-contract=fast`).
+- **Pure cfg split without the feature**: best codegen with zero
+  configuration (this is the default), but no way to pin semantics across
+  build targets — a library user does not control the top-level
+  `RUSTFLAGS`, so results would silently vary between builds; the feature
+  restores that control.
+- **Runtime dispatch on hardware detection**: rejected by the crate's
+  founding principle (ADR-0001).
 
 ## Consequences
 
-- Default builds: `mul_add` has two roundings per lane and — without
-  `fp-contract=fast` — runs as separate mul/add even on FMA hardware,
-  where the fused form would also be faster. The crate docs recommend the
-  flag or the feature when rounding or heavy multiply-add throughput
-  matters.
-- The element bounds of `mul_add`/`fma_from` differ per mode (`Mul + Add`
-  vs `MulAdd`); the methods are available for any `Num`-like element in
-  the default mode.
-- `tests/ops.rs` checks each mode against its own reference, plus a
-  bit-pattern test (`0x3ff0000000000001` vs `0x3ff0000000000000`) proving
-  the feature genuinely switches rounding.
-- The assembly framework encodes all of it: default rows assert
-  mul+add counts (including v2, now a hard check instead of a fallback
-  note), `v3c` asserts fusion under the flag, `v3f` asserts `vfmadd` under
-  the feature, `v2f` reports the 8/16 libm calls, and plain `a*b+c`
-  expressions stay unfused in every mode except `v3c`.
+- By default `mul_add`'s rounding follows the build target; cross-build
+  bit-reproducibility requires `use_libm_fma`.
+- The element bounds of `mul_add`/`fma_from` differ per path (`MulAdd`
+  vs `Mul + Add`); tests and probes mirror the cfg predicate.
+- `tests/ops.rs` checks each path against its own reference, plus a
+  bit-pattern test (`0x3ff0000000000001` vs `0x3ff0000000000000`) whose
+  expectation follows the same predicate — verified under plain
+  `cargo test` (generic x86-64, separated), `--features use_libm_fma`
+  (fused), and `RUSTFLAGS=-Ctarget-cpu=native` (fused).
+- The assembly framework encodes the split: v3/v4/native rows assert
+  `vfmadd` for `mul_add`/`fma_from`, v2 and baseline rows assert
+  separated mul+add (baseline additionally forbids `vfmadd` as the
+  negative control), the `v3c` row shows the separated expression fusing
+  under `-C llvm-args=-fp-contract=fast`, and the `v2f`/`v3f` rows cover
+  the feature (libm calls vs hardware `vfmadd`). Plain `a*b+c`
+  expressions are unaffected by all of this and stay unfused except under
+  fp-contract.

@@ -148,14 +148,15 @@ EXPECT_X86 = {
         "v4": req(need={r"v?(roundpd|rndscalepd)": 1}),
         "native": req(need={r"v?(roundpd|rndscalepd)": 1}),
     },
-    # mul_add default mode: separated mul+add everywhere (fuses only under
-    # fp-contract); use_libm_fma rows (v2f/v3f) switch to the MulAdd lowering.
+    # mul_add default mode: cfg-split per docs/adr/0005 — fused (vfmadd)
+    # where the row's target-cpu has FMA (v3+), separated fast mul+add below
+    # (v2/baseline); v2f/v3f are the use_libm_fma feature rows.
     "probe_mul_add_f64x8": {
         "baseline": req(forbid=["vfmadd"]),  # negative control
         "v2": req(need={r"v?mulpd": 4, r"v?addpd": 4}),
-        "v3": req(need={r"v?mulpd": R2, r"v?addpd": R2}),
-        "v4": req(need={r"v?mulpd": 1, r"v?addpd": 1}),
-        "native": req(need={r"v?mulpd": 1, r"v?addpd": 1}),
+        "v3": req(need={"vfmadd": R2}),
+        "v4": req(need={"vfmadd": 1}),
+        "native": req(need={"vfmadd": 1}),
         "v3c": req(need={"vfmadd": R2}),
         "v2f": info("use_libm_fma: scalar libm fma fallback "
                     "(no FMA ISA; ~4.6x slower than separated)", need={"callq": 0}),
@@ -164,18 +165,19 @@ EXPECT_X86 = {
     "probe_fma_from_f64x8": {
         "baseline": req(forbid=["vfmadd"]),
         "v2": req(need={r"v?mulpd": 4, r"v?addpd": 4}),
-        "v3": req(need={r"v?mulpd": R2, r"v?addpd": R2}),
-        "v4": req(need={r"v?mulpd": 1, r"v?addpd": 1}),
-        "native": req(need={r"v?mulpd": 1, r"v?addpd": 1}),
+        "v3": req(need={"vfmadd": R2}),
+        "v4": req(need={"vfmadd": 1}),
+        "native": req(need={"vfmadd": 1}),
         "v3c": req(need={"vfmadd": R2}),
         "v2f": info("use_libm_fma: scalar libm fma fallback", need={"callq": 0}),
         "v3f": req(need={"vfmadd": R2}),
     },
     "probe_mul_add_f64x16": {
+        "baseline": req(forbid=["vfmadd"]),
         "v2": req(need={r"v?mulpd": 8, r"v?addpd": 8}),
-        "v3": req(need={r"v?mulpd": 4, r"v?addpd": 4}),
-        "v4": req(need={r"v?mulpd": 2, r"v?addpd": 2}),
-        "native": req(need={r"v?mulpd": 2, r"v?addpd": 2}),
+        "v3": req(need={"vfmadd": 4}),
+        "v4": req(need={"vfmadd": 2}),
+        "native": req(need={"vfmadd": 2}),
         "v3c": req(need={"vfmadd": 4}),
         "v2f": info("use_libm_fma: scalar libm fma fallback", need={"callq": 0}),
         "v3f": req(need={"vfmadd": 4}),
@@ -187,10 +189,11 @@ EXPECT_X86 = {
         "native": req(need={r"v?addps": 1}),
     },
     "probe_mul_add_f32x16": {
+        "baseline": req(forbid=["vfmadd"]),
         "v2": req(need={r"v?mulps": 4, r"v?addps": 4}),
-        "v3": req(need={r"v?mulps": R2, r"v?addps": R2}),
-        "v4": req(need={r"v?mulps": 1, r"v?addps": 1}),
-        "native": req(need={r"v?mulps": 1, r"v?addps": 1}),
+        "v3": req(need={"vfmadd": R2}),
+        "v4": req(need={"vfmadd": 1}),
+        "native": req(need={"vfmadd": 1}),
         "v3c": req(need={"vfmadd": R2}),
         "v2f": info("use_libm_fma: scalar libm fmaf fallback", need={"callq": 0}),
         "v3f": req(need={"vfmadd": R2}),

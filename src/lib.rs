@@ -4,10 +4,10 @@
 //!
 //! This crate provides [`Simd`], a fixed-lane vector type `Simd<T, N>` over
 //! `[T; N]`, with lane-wise arithmetic (vector/vector and vector/scalar),
-//! multiply-add (fused or separated per feature; see below), float functions,
-//! comparisons producing masks, mask selection, horizontal reductions, and
-//! slice load/store — all implemented without intrinsics and without runtime
-//! instruction dispatch.
+//! multiply-add (fused where the target has hardware FMA; see below), float
+//! functions, comparisons producing masks, mask selection, horizontal
+//! reductions, and slice load/store — all implemented without intrinsics and
+//! without runtime instruction dispatch.
 //!
 //! Performance relies on the compiler auto-vectorizing this portable code;
 //! build with `-C target-cpu=native` (or a similar `target-cpu` setting) to
@@ -15,9 +15,9 @@
 //!
 //! Element categories are expressed by trait bounds rather than by distinct
 //! types: arithmetic requires [`num_traits::Num`], the float functions require
-//! [`num_traits::Float`], multiply-add requires [`core::ops::Mul`] and
-//! [`core::ops::Add`] by default (or [`num_traits::MulAdd`] under the
-//! `use_libm_fma` feature), and bitwise operations require the element's own
+//! [`num_traits::Float`], multiply-add requires [`num_traits::MulAdd`] where
+//! the target has hardware FMA and [`core::ops::Mul`] with [`core::ops::Add`]
+//! otherwise, and bitwise operations require the element's own
 //! [`core::ops`] implementations. `bool` is a valid element, and
 //! `Simd<bool, N>` doubles as the mask type. The lane count `N` is an
 //! arbitrary const generic.
@@ -34,21 +34,21 @@
 //!
 //! # Multiply-add semantics
 //!
-//! [`mul_add`](Simd::mul_add) and [`fma_from`](Simd::fma_from) have two
-//! compile-time modes, selected by the non-default cargo feature
-//! `use_libm_fma` (see `docs/adr/0005` in the repository for the measured
-//! trade-off):
+//! [`mul_add`](Simd::mul_add) and [`fma_from`](Simd::fma_from) follow the
+//! compilation target (see `docs/adr/0005` in the repository for the
+//! measured trade-off):
 //!
-//! - **default**: evaluated as a separate multiply and add (two roundings per lane). On targets
-//!   without hardware FMA this avoids the slow software-fused libm `fma` calls (~4.6x slower per
-//!   lane there); on FMA-capable targets the expression still fuses into one hardware FMA
-//!   instruction when compiled with `-C llvm-args=-fp-contract=fast`. Note that on FMA-capable
-//!   targets the *fused* form is also the faster one, so setting that flag (or enabling the
-//!   feature) is recommended when either rounding or speed of a heavy multiply-add workload
-//!   matters.
-//! - **`use_libm_fma`**: the element's fused [`num_traits::MulAdd`] — a single rounding per lane; a
-//!   hardware FMA instruction on capable targets with no extra flags, or a correctly-rounded but
-//!   slow libm `fma` call on targets without FMA.
+//! - **targets with hardware FMA** — x86 built with `-C target-cpu` of `x86-64-v3` or higher
+//!   (including `native`), and all aarch64: the element's fused [`num_traits::MulAdd`], a single
+//!   rounding per lane, one FMA instruction per register, no extra flags.
+//! - **targets without** — generic x86-64, `x86-64-v2`, and architectures the predicate does not
+//!   know: a separated multiply and add (two roundings per lane) that never degrades into the slow
+//!   software-fused libm `fma` calls (~4.6x slower than separated there). Under `-C
+//!   llvm-args=-fp-contract=fast` this form still fuses into a hardware FMA instruction on capable
+//!   targets.
+//! - the non-default cargo feature **`use_libm_fma`** pins the fused form on *every* target,
+//!   accepting the libm software `fma` where hardware is absent — use it when results must be
+//!   bit-identical across build targets.
 //!
 //! # Example
 //!
@@ -57,8 +57,8 @@
 //!
 //! let a = f64x8::splat(2.0);
 //! let b = f64x8::from([1.0; 8]);
-//! // lane-wise multiply-add: (a * b) * 3.0 + 0.0 (fused under `use_libm_fma`
-//! // or fp-contract; separated otherwise — exact for these inputs either way)
+//! // lane-wise multiply-add: (a * b) * 3.0 + 0.0 (fused where the target
+//! // has hardware FMA; exact for these inputs either way)
 //! let c = (a * b).mul_add(f64x8::splat(3.0), f64x8::zero());
 //! assert_eq!(c.reduce_sum(), 48.0);
 //!
