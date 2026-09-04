@@ -55,6 +55,12 @@ A named vector type that adds enforced memory alignment on top of the generic ve
 the concrete element aliases are aligned aliases. Masks are never aligned aliases.
 _Avoid_: aligned type, aligned wrapper
 
+**Assembly probe**:
+A small fenced function that the verification script compiles to assembly to check
+which instruction families the fallback strategy produced for one operation and
+target level.
+_Avoid_: benchmark, kernel, asm test
+
 **Block**:
 An application-level grouping of several vectors for cache-blocking; explicitly outside
 this crate's scope.

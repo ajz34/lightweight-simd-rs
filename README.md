@@ -23,3 +23,30 @@ This project will probably extensively use AI code agent for development.
 - If intrinsics are not avoidable (default rust compiler does not correctly optimize), then a cargo feature (compile-time instead of runtime-dispatch) `with-intrinsics` will perform optimize by `cfg` attribute with `target-cpu`.
 - A cargo feature `with-full-intrinsics` will always introduce intrinsics for optimization, but this is not the best/intended way of using this crate.
 
+## Verifying codegen
+
+A static checker (no runtime benchmarking) verifies the auto-vectorization
+promise: it compiles black-box-fenced probe functions for several
+`-C target-cpu` levels (`x86-64-v2`, `-v3`, `-v4`, `native`, plus a
+generic-SSE2 negative-control row) and asserts the expected vector
+instruction families with width-aware counts.
+
+```sh
+python3 scripts/check_asm.py                                  # full matrix; exit 1 on any miss
+python3 scripts/check_asm.py --dump probe_mul_add_f64x8 v3    # inspect one body
+```
+
+Checks that cannot hold at a target level are informational notes rather than
+failures (e.g. there is no FMA instruction at `x86-64-v2`, so `mul_add` lowers
+to scalar `fma` calls; `f16` arithmetic via the `half` crate stays scalar on
+x86). Emitted assembly lands in `target/asm/` (gitignored). See
+`docs/adr/0004-codegen-verification-by-assembly-matching.md`.
+
+Architectures other than x86-64 are scaffolded in the same script: each
+architecture is one entry (compile rows + expectation table), and an
+architecture without expectations yet runs in informational mode — probes
+compile and report, nothing fails. `--hist` prints per-probe instruction
+histograms and `--dump` single bodies, which is how a table for a new
+architecture gets authored on that architecture's host.
+
+
