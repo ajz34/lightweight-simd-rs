@@ -66,4 +66,20 @@ Both populated tables run in CI (`.github/workflows/`): the x86-64 matrix on
 an ubuntu runner and the aarch64 matrix on a GitHub-provided Apple Silicon
 macOS runner, alongside fmt/clippy and the test suite.
 
+## Example: BLIS-style GEMM
+
+`examples/blis_matmul.rs` demonstrates that the portable types compose into a
+cache-blocked BLIS-style matrix multiplication: fixed 4096×4096×4096 `f64`,
+row-major, non-transposed, with operand packing, an 8×16 register-blocked
+micro-kernel over `f64x8`, a 2D rayon task grid (a dev-dependency, example
+usage only), and one shared pre-packed copy of `B` — still without any
+intrinsics. Blocking targets x86-64 AVX-512F (asserted at startup) and is
+measured on the development host (AMD Ryzen 9 9955HX, 16 Zen 5 cores, DDR5,
+balance power mode), where it reaches ~1.2 TFLOP/s — on par with OpenBLAS
+on the same machine:
+
+```sh
+RUSTFLAGS="-C target-cpu=native" cargo run --release --example blis_matmul
+```
+
 

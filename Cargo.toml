@@ -17,6 +17,7 @@ half = { version = "2", optional = true, features = ["num-traits"] }
 [dev-dependencies]
 num-complex = "0.4"
 half = { version = "2", features = ["num-traits"] }
+rayon = "1"
 
 [features]
 complex = ["dep:num-complex"]
