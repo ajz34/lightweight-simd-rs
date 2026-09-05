@@ -2,6 +2,10 @@
 
 This project will implement lightweight, generic fixed-array types in rust.
 
+A comprehensive single-file map of the API surface — also intended as an
+orientation document for AI code agents — is at [src/guide.md](src/guide.md)
+(rendered in the API docs as the `guide` module).
+
 ## Scopes
 
 - Array types will be similar to SIMD types (f64x8, f32x16, etc). Generic may allow non-standard types (like bf16) to be also be representable.

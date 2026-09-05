@@ -22,6 +22,10 @@
 //! `Simd<bool, N>` doubles as the mask type. The lane count `N` is an
 //! arbitrary const generic.
 //!
+//! A full one-file map of the API surface — written for users and AI coding
+//! agents — lives in the [`guide`] module (kept as `src/guide.md` in the
+//! repository).
+//!
 //! Concrete aliases such as `f64x8` are enforced-alignment types
 //! ([`Aligned64<f64, 8>`](Aligned64)): array-backed siblings of [`Simd`] that
 //! share one implementation — every operation is defined once for `Simd` and
@@ -86,6 +90,13 @@ pub mod aligned;
 mod memory;
 mod ops;
 mod reduce;
+
+/// Dummy doc-only module: renders `src/guide.md` (the one-file API overview,
+/// also linked from the README) into the rustdoc output.
+#[cfg(doc)]
+pub mod guide {
+    #![doc = include_str!("guide.md")]
+}
 
 pub use alias::*;
 pub use aligned::{Aligned4, Aligned8, Aligned16, Aligned32, Aligned64};
