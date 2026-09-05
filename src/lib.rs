@@ -52,19 +52,27 @@
 //!
 //! # Example
 //!
+//! Same example as the README; kept as a doctest so it is verified by CI.
+//!
 //! ```
-//! use lightweight_simd::f64x8;
+//! use lightweight_simd::{f64x8, Simd};
 //!
-//! let a = f64x8::splat(2.0);
-//! let b = f64x8::from([1.0; 8]);
-//! // lane-wise multiply-add: (a * b) * 3.0 + 0.0 (fused where the target
-//! // has hardware FMA; exact for these inputs either way)
-//! let c = (a * b).mul_add(f64x8::splat(3.0), f64x8::zero());
-//! assert_eq!(c.reduce_sum(), 48.0);
+//! // typed aliases (enforced alignment) or the generic Simd<T, N>
+//! let a = f64x8::from([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+//! let b = f64x8::splat(2.0);
 //!
-//! let mask = a.simd_gt(b);
-//! assert!(mask.all_true());
-//! assert_eq!(a.mask_select(mask, b).reduce_sum(), 16.0);
+//! let c = a.mul_add(b, f64x8::one()); // a*b + 1, fused on FMA targets
+//! assert_eq!(c.reduce_sum(), 80.0);
+//!
+//! let mask = a.simd_gt(f64x8::splat(4.0)); // comparisons -> masks
+//! assert_eq!(a.mask_select(mask, b).to_array(), [2.0, 2.0, 2.0, 2.0, 5.0, 6.0, 7.0, 8.0]);
+//!
+//! let mut buf = [0.0; 8];
+//! a.store_slice(&mut buf); // slice load/store
+//!
+//! // any element type and lane count
+//! let u = Simd::from([10u32, 20, 30]);
+//! assert_eq!((u * 3).to_array(), [30, 60, 90]);
 //! ```
 
 #![warn(missing_docs)]

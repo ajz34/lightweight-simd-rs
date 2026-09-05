@@ -11,6 +11,49 @@ This project will implement lightweight, generic fixed-array types in rust.
 - We are expecting to implement some common traits (like `num`) for scientific computation.
 - We mostly stick on stable rust.
 
+## Usage
+
+Add the dependency, and build with a `target-cpu` setting so the compiler
+auto-vectorizes (correctness does not depend on it):
+
+```toml
+[dependencies]
+lightweight-simd = "0.1"
+```
+
+```sh
+RUSTFLAGS="-C target-cpu=native" cargo build --release
+```
+
+```rust
+use lightweight_simd::{f64x8, Simd};
+
+// typed aliases (enforced alignment) or the generic Simd<T, N>
+let a = f64x8::from([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+let b = f64x8::splat(2.0);
+
+let c = a.mul_add(b, f64x8::one()); // a*b + 1, fused on FMA targets
+assert_eq!(c.reduce_sum(), 80.0);
+
+let mask = a.simd_gt(f64x8::splat(4.0)); // comparisons -> masks
+assert_eq!(a.mask_select(mask, b).to_array(), [2.0, 2.0, 2.0, 2.0, 5.0, 6.0, 7.0, 8.0]);
+
+let mut buf = [0.0; 8];
+a.store_slice(&mut buf); // slice load/store
+
+// any element type and lane count
+let u = Simd::from([10u32, 20, 30]);
+assert_eq!((u * 3).to_array(), [30, 60, 90]);
+```
+
+Lane-wise `+ - * /` (vector-vector or vector-scalar), float functions (`abs`,
+`sqrt`, `floor`, `min`, ...), comparisons (`simd_lt`, `simd_gt`, ...) with mask
+selection, reductions (`reduce_sum`, `reduce_product`), and slice loads
+(`from_slice`, `from_slice_pad`) are shared by `Simd` and the aligned alias
+types; transcendental functions go through `map` (e.g. `v.map(f64::exp)`).
+The `complex` and `half` features add the `c64x*`/`c32x*` and `f16x*`/`bf16x*`
+aliases. Full API: `cargo doc --open`.
+
 ## Notes
 
 This project is somehow inspired by crate fearless_simd, pulp. However, the aim of this project is completely different to those projects (dispatchable SIMD).
