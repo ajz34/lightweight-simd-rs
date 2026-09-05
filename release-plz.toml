@@ -1,0 +1,5 @@
+# Standalone crate (no workspace): global settings only, no [[package]]
+# overrides needed. Tag format v{version}; changelog at repo root.
+[workspace]
+git_tag_enable = true
+git_release_enable = true

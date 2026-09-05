@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 description = "Lightweight generic fixed-array vector types relying on compiler auto-vectorization"
+repository = "https://github.com/ajz34/lightweight-simd-rs"
 readme = "README.md"
 keywords = ["simd", "vector", "numeric"]
 categories = ["science", "mathematics"]
